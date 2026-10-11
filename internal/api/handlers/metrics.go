@@ -5,15 +5,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
-	metricsapp "github.com/76Parker/metrico/internal/applications/metrics"
-	"github.com/76Parker/metrico/internal/domain/metrics"
 	"github.com/gin-gonic/gin"
 	goccyjson "github.com/goccy/go-json"
+
+	"github.com/76Parker/metrico/internal/applications/audit"
+	metricsapp "github.com/76Parker/metrico/internal/applications/metrics"
+	"github.com/76Parker/metrico/internal/domain/metrics"
 )
 
 const batchReservationSize = 50
@@ -27,14 +31,33 @@ type metricsApplication interface {
 type MetricsHandler struct {
 	metricSvc       metricsApplication
 	maxPathParamLen int
+	auditPublisher  auditPublisher
 }
 
-func NewMetricsHandler(metricSvc metricsApplication) *MetricsHandler {
-	maxPathParamLen := 64
-	return &MetricsHandler{
-		metricSvc:       metricSvc,
-		maxPathParamLen: maxPathParamLen,
+type auditPublisher interface {
+	Notify(ctx context.Context, event audit.Event)
+}
+
+// MetricsHandlerOption configures optional metrics handler behavior.
+type MetricsHandlerOption func(*MetricsHandler)
+
+// WithAuditPublisher enables notifications about successfully received metrics.
+func WithAuditPublisher(publisher auditPublisher) MetricsHandlerOption {
+	return func(handler *MetricsHandler) {
+		handler.auditPublisher = publisher
 	}
+}
+
+// NewMetricsHandler creates a metrics handler with optional audit publishing.
+func NewMetricsHandler(metricSvc metricsApplication, options ...MetricsHandlerOption) *MetricsHandler {
+	handler := &MetricsHandler{
+		metricSvc:       metricSvc,
+		maxPathParamLen: 64,
+	}
+	for _, option := range options {
+		option(handler)
+	}
+	return handler
 }
 
 func (h *MetricsHandler) Update(c *gin.Context) {
@@ -59,6 +82,7 @@ func (h *MetricsHandler) Update(c *gin.Context) {
 		return
 	}
 	c.Header("Content-Type", "text/plain; charset=utf-8")
+	h.notifyAudit(c, []string{cmd.Name})
 	c.Status(http.StatusOK)
 }
 
@@ -108,6 +132,7 @@ func (h *MetricsHandler) UpdateFromJSON(c *gin.Context) {
 		c.Error(fmt.Errorf("marshal updated metric: %w", err))
 		return
 	}
+	h.notifyAudit(c, []string{cmd.Name})
 	c.Data(http.StatusOK, "application/json", response)
 }
 
@@ -130,7 +155,29 @@ func (h *MetricsHandler) BatchUpdateFromJSON(c *gin.Context) {
 		c.Error(err)
 		return
 	}
+	if h.auditPublisher != nil && len(batchCommand) > 0 {
+		metricNames := make([]string, 0, len(batchCommand))
+		for _, command := range batchCommand {
+			metricNames = append(metricNames, command.Name)
+		}
+		h.notifyAudit(c, metricNames)
+	}
 	c.Status(http.StatusOK)
+}
+
+func (h *MetricsHandler) notifyAudit(c *gin.Context, metricNames []string) {
+	if h.auditPublisher == nil {
+		return
+	}
+	ipAddress, _, err := net.SplitHostPort(c.Request.RemoteAddr)
+	if err != nil {
+		ipAddress = c.Request.RemoteAddr
+	}
+	h.auditPublisher.Notify(c.Request.Context(), audit.Event{
+		TS:        time.Now().Unix(),
+		Metrics:   metricNames,
+		IPAddress: ipAddress,
+	})
 }
 
 func (h *MetricsHandler) GetFromJSON(c *gin.Context) {

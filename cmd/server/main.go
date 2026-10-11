@@ -12,10 +12,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/caarlos0/env/v11"
+
 	"github.com/76Parker/metrico/internal/app"
 	"github.com/76Parker/metrico/internal/config"
 	"github.com/76Parker/metrico/pkg/logger"
-	"github.com/caarlos0/env/v11"
 )
 
 // Default values for flags
@@ -44,6 +45,8 @@ type envConfig struct {
 	StoreInterval   int    `env:"STORE_INTERVAL"`
 	Restore         bool   `env:"RESTORE"`
 	DatabaseDSN     string `env:"DATABASE_DSN"`
+	AuditFile       string `env:"AUDIT_FILE"`
+	AuditURL        string `env:"AUDIT_URL"`
 }
 
 func (c *envConfig) applyOverrides() {
@@ -92,6 +95,7 @@ func main() {
 	flag.IntVar(&storeInterval, "i", defaultStoreInterval, "store interval")           // -i
 	flag.BoolVar(&restore, "r", defaultRestore, "restore from file")                   // -r
 	flag.StringVar(&databaseDSN, "d", defaultDatabaseDSN, "database DSN")              // -d
+	registerAuditFlags(flag.CommandLine, &cfg.Audit)
 
 	flag.Parse()
 	configFromEnv, err := env.ParseAs[envConfig]()
@@ -99,6 +103,7 @@ func main() {
 		log.Fatal("error parsing env:", err)
 	}
 	configFromEnv.applyOverrides()
+	configFromEnv.applyAuditOverrides(&cfg.Audit)
 
 	if err := validateHostPort(hostPort); err != nil {
 		log.Fatalf("invalid server address: %v", err)
@@ -119,6 +124,20 @@ func main() {
 
 	if err := app.Run(ctx, *cfg, applicationLog); err != nil {
 		log.Fatal("error running application:", err)
+	}
+}
+
+func registerAuditFlags(flags *flag.FlagSet, auditCfg *config.Audit) {
+	flags.StringVar(&auditCfg.File, "audit-file", "", "Audit log file path")
+	flags.StringVar(&auditCfg.URL, "audit-url", "", "Audit log HTTP endpoint")
+}
+
+func (c *envConfig) applyAuditOverrides(auditCfg *config.Audit) {
+	if _, hasValue := os.LookupEnv("AUDIT_FILE"); hasValue {
+		auditCfg.File = c.AuditFile
+	}
+	if _, hasValue := os.LookupEnv("AUDIT_URL"); hasValue {
+		auditCfg.URL = c.AuditURL
 	}
 }
 
