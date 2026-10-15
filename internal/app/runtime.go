@@ -102,7 +102,7 @@ func newApplication(ctx context.Context, cfg config.Config, log logger.Logger) (
 	app.server = api.NewRouter(
 		handlers.NewMetricsHandler(metricsApplication, handlerOptions...),
 		handlers.NewHealthHandler(log, healthApplication),
-		cfg.HttpConfig,
+		cfg.HTTPConfig,
 		log,
 	)
 

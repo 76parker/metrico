@@ -13,8 +13,8 @@ import (
 type Config struct {
 	// PPROFAddress задаёт числовой loopback-адрес диагностики; пустой адрес отключает pprof.
 	PPROFAddress string `yaml:"-"`
-	// HttpConfig содержит настройки основного HTTP-сервера.
-	HttpConfig HTTP `yaml:"http"`
+	// HTTPConfig содержит настройки основного HTTP-сервера.
+	HTTPConfig HTTP `yaml:"http"`
 	// SnapshotServiceConfig содержит настройки снимков хранилища в памяти.
 	SnapshotServiceConfig SnapshotService
 	// Postgres содержит настройки PostgreSQL-хранилища.

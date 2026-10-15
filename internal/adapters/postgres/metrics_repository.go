@@ -24,7 +24,7 @@ func NewMetricsRepository(q *pgen.Queries) *metricsRepo {
 
 // Apply преобразует изменения в один SQL-батч и выполняет его без повторных попыток.
 // Повтор counter-записи мог бы повторно применить приращение.
-func (t *metricsRepo) Apply(ctx context.Context, changes []metricapp.Change) error {
+func (r *metricsRepo) Apply(ctx context.Context, changes []metricapp.Change) error {
 	batch, err := makeBatch(changes)
 	if err != nil {
 		return err
@@ -35,7 +35,7 @@ func (t *metricsRepo) Apply(ctx context.Context, changes []metricapp.Change) err
 		return fmt.Errorf("marshal batch: %w", err)
 	}
 	// Retry-вставка небезопасна - вызываем без retry
-	if err := t.q.BatchUpsert(ctx, batchByte); err != nil {
+	if err := r.q.BatchUpsert(ctx, batchByte); err != nil {
 		return fmt.Errorf("batch upsert: %w", err)
 	}
 	return nil

@@ -112,8 +112,8 @@ func main() {
 		log.Fatalf("invalid server address: %v", err)
 	}
 
-	cfg.HttpConfig.Address = hostPort
-	cfg.HttpConfig.HashKey = key
+	cfg.HTTPConfig.Address = hostPort
+	cfg.HTTPConfig.HashKey = key
 	cfg.SnapshotServiceConfig = config.SnapshotService{
 		StoreInterval:   time.Duration(storeInterval) * time.Second,
 		FileStoragePath: fileStoragePath,

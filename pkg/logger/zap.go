@@ -83,23 +83,23 @@ func newZapCore(encoder zapcore.Encoder, writer io.Writer, logLevel zapcore.Leve
 }
 
 // Info записывает информационное сообщение с дополнительными полями.
-func (zap *ZapLogger) Info(msg string, keysAndValues ...any) {
-	zap.logger.Infow(msg, keysAndValues...)
+func (z *ZapLogger) Info(msg string, keysAndValues ...any) {
+	z.logger.Infow(msg, keysAndValues...)
 }
 
 // Error записывает сообщение об ошибке с дополнительными полями.
-func (zap *ZapLogger) Error(msg string, keysAndValues ...any) {
-	zap.logger.Errorw(msg, keysAndValues...)
+func (z *ZapLogger) Error(msg string, keysAndValues ...any) {
+	z.logger.Errorw(msg, keysAndValues...)
 }
 
 // Debug записывает отладочное сообщение с дополнительными полями.
-func (zap *ZapLogger) Debug(msg string, keysAndValues ...any) {
-	zap.logger.Debugw(msg, keysAndValues...)
+func (z *ZapLogger) Debug(msg string, keysAndValues ...any) {
+	z.logger.Debugw(msg, keysAndValues...)
 }
 
 // Warn записывает предупреждение с дополнительными полями.
-func (zap *ZapLogger) Warn(msg string, keysAndValues ...any) {
-	zap.logger.Warnw(msg, keysAndValues...)
+func (z *ZapLogger) Warn(msg string, keysAndValues ...any) {
+	z.logger.Warnw(msg, keysAndValues...)
 }
 
 // With возвращает производный журнал с постоянными полями, сохраняя исходный журнал.
