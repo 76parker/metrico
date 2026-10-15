@@ -23,11 +23,13 @@ type changeNotifier interface {
 	onMetricsChanged(ctx context.Context) error
 }
 
+// Application объединяет операции с метриками и уведомление о необходимости снимка.
 type Application struct {
 	metricsService        service
 	metricsChangeNotifier changeNotifier
 }
 
+// NewApplication создаёт приложение метрик; без опций сохранение снимков отключено.
 func NewApplication(metricsService service, opts ...ApplicationOption) *Application {
 	app := &Application{
 		metricsService:        metricsService,
@@ -38,6 +40,9 @@ func NewApplication(metricsService service, opts ...ApplicationOption) *Applicat
 	}
 	return app
 }
+
+// Update применяет одну команду и уведомляет механизм сохранения об изменении.
+// Ошибка сохранения может возвращаться после успешного обновления хранилища.
 func (s *Application) Update(ctx context.Context, cmd UpdateCommand) error {
 	err := s.metricsService.update(ctx, cmd)
 	if err != nil {
@@ -46,6 +51,8 @@ func (s *Application) Update(ctx context.Context, cmd UpdateCommand) error {
 	return s.metricsChangeNotifier.onMetricsChanged(ctx)
 }
 
+// BatchUpdate проверяет все команды до передачи единого пакета изменений хранилищу.
+// После успешной записи уведомляет механизм сохранения снимков.
 func (s *Application) BatchUpdate(ctx context.Context, cmd []UpdateCommand) error {
 	err := s.metricsService.batchUpdate(ctx, cmd)
 	if err != nil {
@@ -54,10 +61,12 @@ func (s *Application) BatchUpdate(ctx context.Context, cmd []UpdateCommand) erro
 	return s.metricsChangeNotifier.onMetricsChanged(ctx)
 }
 
+// GetByName возвращает метрику по имени или ошибку выбранного хранилища.
 func (s *Application) GetByName(ctx context.Context, name string) (metrics.Metrics, error) {
 	return s.metricsService.getByName(ctx, name)
 }
 
+// GetAll возвращает текущие метрики без гарантии порядка.
 func (s *Application) GetAll(ctx context.Context) ([]metrics.Metrics, error) {
 	return s.metricsService.getAll(ctx)
 }

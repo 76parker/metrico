@@ -46,6 +46,9 @@ func (b *responseBuffer) WriteString(data string) (int, error) {
 	return b.Write([]byte(data))
 }
 
+// VerifyAndSign проверяет переданную подпись HashSHA256 и подписывает тело ответа.
+// Запросы без подписи допускаются; неверная подпись даёт HTTP 400.
+// При пустом ключе возвращает next без дополнительной обработки.
 func VerifyAndSign(next http.Handler, key string) http.Handler {
 	if key == "" {
 		return next

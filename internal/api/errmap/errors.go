@@ -1,3 +1,4 @@
+// Package errmap сопоставляет ошибки приложения с публичными HTTP-ответами.
 package errmap
 
 import (
@@ -10,6 +11,8 @@ import (
 
 type registry map[error]Error
 
+// Registry сопоставляет ошибки обработчиков и метрик с публичными HTTP-ошибками.
+// Реестр используется только для чтения во время обработки запросов.
 var Registry = registry{
 	// Transport-specific errors
 	handlers.ErrFieldTooLong:       newError("metric value is too long", CodeInvalidRequest, http.StatusBadRequest),
@@ -26,8 +29,11 @@ var Registry = registry{
 	metrics.ErrCounterValueIsNil:      newError("counter value is nil", CodeInvalidMetricValue, http.StatusBadRequest),
 }
 
+// UnexpectedError описывает ответ HTTP 500 для ошибки, отсутствующей в Registry.
 var UnexpectedError = newError("unexpected error", CodeInternal, http.StatusInternalServerError)
 
+// Resolve находит HTTP-ошибку через errors.Is, включая обёрнутые ошибки.
+// Второе значение равно false, если в реестре нет соответствия.
 func (r registry) Resolve(err error) (Error, bool) {
 	for target, resolved := range r {
 		if errors.Is(err, target) {
@@ -37,13 +43,13 @@ func (r registry) Resolve(err error) (Error, bool) {
 	return Error{}, false
 }
 
-// Структура ошибки возвращаемая клиенту
+// Error описывает JSON-ответ об ошибке с публичным сообщением, кодом и HTTP-статусом.
 type Error struct {
-	// Публичное сообщение для клиента
+	// Message содержит публичное описание ошибки для клиента.
 	Message string `json:"message"`
-	// Код ошибки для удобного отображения на Frontend
+	// Code содержит машиночитаемый код ошибки.
 	Code string `json:"code"`
-	// HTTP статус код
+	// Status содержит HTTP-статус ответа.
 	Status int `json:"status"`
 }
 

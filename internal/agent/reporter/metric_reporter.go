@@ -1,3 +1,4 @@
+// Package reporter подготавливает и отправляет пакеты метрик HTTP-серверу.
 package reporter
 
 import (
@@ -36,7 +37,7 @@ type systemMetricProvider interface {
 	Metrics() []metrics.Metrics
 }
 
-// MetricReporter отправляет собранные метрики от MetricsProvider'a на сервер
+// MetricReporter периодически отправляет runtime- и системные метрики пакетами по HTTP.
 type MetricReporter struct {
 	client         *http.Client
 	key            string
@@ -92,7 +93,9 @@ func WithSystemMetricProvider(provider systemMetricProvider) Option {
 	}
 }
 
-// NewMetricReporter создает новый MetricReporter с заданным URL и опциями.
+// NewMetricReporter разбирает адрес сервера и применяет опции отправки.
+// При ошибке разбора URL возвращает nil. Для Run задайте HTTP-клиент, источник
+// runtime-метрик и положительный интервал соответствующими опциями.
 func NewMetricReporter(
 	serverAddr string,
 	options ...Option,
@@ -114,7 +117,9 @@ func NewMetricReporter(
 	return reporter
 }
 
-// Run запускает бесконеный цикл отправки метрик на сервер (блокирующая операция)
+// Run отправляет метрики до отмены ctx и ожидает завершения отправителей.
+// Возвращает ошибку контекста при остановке; ошибки отдельных отправок журналируются.
+// Для ограничения ожидания текущих HTTP-запросов настройте таймаут клиента.
 func (r *MetricReporter) Run(ctx context.Context) error {
 	reportTicker := time.NewTicker(r.reportInterval)
 	defer reportTicker.Stop()

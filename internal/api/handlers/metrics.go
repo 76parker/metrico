@@ -1,4 +1,4 @@
-// Пакет содержит в себе HTTP-обработчики запросов для работы с метриками
+// Package handlers реализует HTTP-обработчики метрик и проверки доступности.
 package handlers
 
 import (
@@ -28,6 +28,10 @@ type metricsApplication interface {
 	GetByName(ctx context.Context, name string) (metrics.Metrics, error)
 	GetAll(ctx context.Context) ([]metrics.Metrics, error)
 }
+
+// MetricsHandler обслуживает HTTP-запросы чтения и изменения метрик.
+// Создавайте обработчик через NewMetricsHandler и подключайте ErrorHandler
+// для преобразования ошибок приложения в HTTP-ответы.
 type MetricsHandler struct {
 	metricSvc       metricsApplication
 	maxPathParamLen int
@@ -60,6 +64,9 @@ func NewMetricsHandler(metricSvc metricsApplication, options ...MetricsHandlerOp
 	return handler
 }
 
+// Update обрабатывает POST /update/:metricType/:metricName/:metricValue.
+// Gauge заменяет сохранённое значение, counter прибавляет переданное приращение.
+// При успехе возвращает HTTP 200 без тела; ошибки передаёт middleware ErrorHandler.
 func (h *MetricsHandler) Update(c *gin.Context) {
 	params := [3]string{
 		strings.TrimSpace(c.Param("metricType")),
@@ -106,6 +113,9 @@ func (r updateRequest) toCommand() metricsapp.UpdateCommand {
 	}
 }
 
+// UpdateFromJSON обрабатывает POST /update/ с JSON-описанием одной метрики.
+// Для gauge используется поле value, для counter — delta; успешный ответ
+// содержит обновлённую метрику в JSON. Тело запроса ограничено 1 MiB.
 func (h *MetricsHandler) UpdateFromJSON(c *gin.Context) {
 	c.Header("Content-Type", "application/json")
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
@@ -136,6 +146,9 @@ func (h *MetricsHandler) UpdateFromJSON(c *gin.Context) {
 	c.Data(http.StatusOK, "application/json", response)
 }
 
+// BatchUpdateFromJSON обрабатывает POST /updates/ с JSON-массивом метрик.
+// При успехе возвращает HTTP 200 без тела. Неизвестные поля JSON отклоняются,
+// размер тела ограничен 1 MiB; ошибки передаются middleware ErrorHandler.
 func (h *MetricsHandler) BatchUpdateFromJSON(c *gin.Context) {
 	c.Header("Content-Type", "application/json")
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
@@ -180,6 +193,9 @@ func (h *MetricsHandler) notifyAudit(c *gin.Context, metricNames []string) {
 	})
 }
 
+// GetFromJSON обрабатывает POST /value/ и возвращает метрику по полю id в JSON.
+// Размер тела ограничен 1 MiB; ошибки чтения и отсутствия метрики передаются
+// middleware ErrorHandler.
 func (h *MetricsHandler) GetFromJSON(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
 	decoder := goccyjson.NewDecoder(c.Request.Body)
@@ -204,6 +220,8 @@ func (h *MetricsHandler) GetFromJSON(c *gin.Context) {
 	c.Data(http.StatusOK, "application/json; charset=utf-8", response)
 }
 
+// GetByName обрабатывает GET /value/:metricType/:metricName.
+// Возвращает числовое значение метрики как text/plain; ошибки передаёт ErrorHandler.
 func (h *MetricsHandler) GetByName(c *gin.Context) {
 	metricName := strings.TrimSpace(c.Param("metricName"))
 	metricType := strings.TrimSpace(c.Param("metricType"))
@@ -228,6 +246,8 @@ type metricResponse struct {
 	Value any
 }
 
+// GetAll обрабатывает GET / и формирует HTML-список метрик, отсортированный по имени.
+// Для отображения использует предварительно загруженный шаблон index.tmpl.
 func (h *MetricsHandler) GetAll(c *gin.Context) {
 	metricsSnapshot, err := h.metricSvc.GetAll(c.Request.Context())
 	if err != nil {

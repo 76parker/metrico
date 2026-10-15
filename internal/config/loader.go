@@ -1,4 +1,4 @@
-// Пакет содержит в себе загрузчик конфигурации
+// Package config описывает настройки сервера и загрузку конфигурации из YAML.
 package config
 
 import (
@@ -8,14 +8,23 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Config объединяет настройки HTTP, диагностики, хранилищ и аудита сервера.
+// PPROFAddress задаётся флагом или переменной окружения и не загружается из YAML.
 type Config struct {
-	PPROFAddress          string `yaml:"-"`
-	HttpConfig            HTTP   `yaml:"http"`
+	// PPROFAddress задаёт числовой loopback-адрес диагностики; пустой адрес отключает pprof.
+	PPROFAddress string `yaml:"-"`
+	// HttpConfig содержит настройки основного HTTP-сервера.
+	HttpConfig HTTP `yaml:"http"`
+	// SnapshotServiceConfig содержит настройки снимков хранилища в памяти.
 	SnapshotServiceConfig SnapshotService
-	Postgres              Postgres
-	Audit                 Audit
+	// Postgres содержит настройки PostgreSQL-хранилища.
+	Postgres Postgres
+	// Audit независимо включает файловый и HTTP-приёмники аудита.
+	Audit Audit
 }
 
+// Load читает YAML-файл конфигурации по configPath.
+// Флаги и переменные окружения применяет вызывающий код после загрузки файла.
 func Load(configPath string) (*Config, error) {
 	var cfg Config
 	rawCfg, err := os.ReadFile(configPath)

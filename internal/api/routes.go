@@ -1,4 +1,4 @@
-// Пакет содержит в себе регистрацию HTTP маршрутов для API и инициализацию HTTP сервера
+// Package api собирает HTTP-маршруты сервера метрик и диагностики.
 package api
 
 import (
@@ -11,6 +11,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// NewRouter создаёт HTTP-сервер с маршрутами метрик и проверки доступности.
+// Сервер ещё не слушает порт. Шаблоны загружаются из templates/* относительно
+// текущего каталога; при отсутствии шаблонов Gin вызывает panic.
 func NewRouter(
 	metricsHandler *handlers.MetricsHandler,
 	healthHandler *handlers.HealthHandler,

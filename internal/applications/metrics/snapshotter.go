@@ -37,6 +37,8 @@ type snapshotPolicy struct {
 	saveInterval time.Duration
 }
 
+// SnapshotCoordinator восстанавливает метрики и управляет сохранением снимков.
+// Содержит состояние синхронизации и не должен копироваться после использования.
 type SnapshotCoordinator struct {
 	policy       snapshotPolicy
 	store        snapshotStore
@@ -44,6 +46,9 @@ type SnapshotCoordinator struct {
 	snapshotCoordinatorState
 }
 
+// NewSnapshotCoordinator создаёт координатор сохранения снимков.
+// Нулевой saveInterval сохраняет снимок при изменениях, положительный — в Run.
+// Для периодического режима передавайте положительный интервал.
 func NewSnapshotCoordinator(store snapshotStore, metricsStore metricsStore, saveInterval time.Duration) *SnapshotCoordinator {
 	var mode snapshotMode
 	if saveInterval == 0 {
@@ -62,7 +67,8 @@ func NewSnapshotCoordinator(store snapshotStore, metricsStore metricsStore, save
 	}
 }
 
-// Restore Восстанавливает метрики из хранилища снапшотов и загружает их в физическое хранилище метрик при старте
+// Restore однократно пытается загрузить снимок в хранилище метрик.
+// Повторный вызов не выполняет восстановление, даже если первая попытка завершилась ошибкой.
 func (s *SnapshotCoordinator) Restore(ctx context.Context) error {
 	var restoreErr error
 	s.restoreOnce.Do(func() {
@@ -79,7 +85,8 @@ func (s *SnapshotCoordinator) Restore(ctx context.Context) error {
 	return restoreErr
 }
 
-// Run periodically saves snapshots until ctx is canceled.
+// Run периодически сохраняет снимки до отмены ctx, журналируя ошибки сохранения.
+// В синхронном режиме сразу возвращает nil без запуска периодического сохранения.
 func (s *SnapshotCoordinator) Run(ctx context.Context) error {
 	if s.policy.mode != snapshotModeAsync {
 		return nil

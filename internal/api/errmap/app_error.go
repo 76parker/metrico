@@ -1,28 +1,28 @@
 package errmap
 
-// Коды ошибок нужны для того что бы представлять ошибку в машиночитаемом виде (в основном - для Frontend)
+// Машиночитаемые коды ошибок для клиентов HTTP API.
 const (
-	// Ресурс не найден
+	// CodeNotFound обозначает отсутствие запрошенного ресурса.
 	CodeNotFound = "not_found"
 
-	// Внутренняя/неизвестная ошибка
+	// CodeInternal обозначает внутреннюю или неизвестную ошибку приложения.
 	CodeInternal = "internal"
 
-	// Недопустимый тип метрики
+	// CodeInvalidMetricType обозначает неподдерживаемый тип метрики.
 	CodeInvalidMetricType = "invalid_metric_type"
 
-	// Пытаемся добавить 2 метрики с одинаковым именем но разными типами
+	// CodeTypeConflict обозначает конфликт типов метрик с одним именем.
 	CodeTypeConflict = "metrics_type_conflict"
 
-	// Недопустимое значение для метрики (не соответствует ожидаемому типу)
+	// CodeInvalidMetricValue обозначает значение, не соответствующее типу метрики.
 	CodeInvalidMetricValue = "invalid_metric_value"
 
-	// Пришло пустое значение для какого-либо типа
+	// CodeEmpty обозначает отсутствие обязательного значения.
 	CodeEmpty = "empty"
 
-	// Некорректное тело HTTP-запроса
+	// CodeInvalidJSON обозначает ошибку декодирования тела HTTP-запроса.
 	CodeInvalidJSON = "invalid_json"
 
-	// Некорректные параметры HTTP-запроса
+	// CodeInvalidRequest обозначает недопустимые параметры HTTP-запроса.
 	CodeInvalidRequest = "invalid_request"
 )

@@ -17,10 +17,13 @@ type metricsRepo struct {
 	q *pgen.Queries
 }
 
+// NewMetricsRepository создаёт адаптер метрик поверх подготовленных sqlc-запросов.
 func NewMetricsRepository(q *pgen.Queries) *metricsRepo {
 	return &metricsRepo{q: q}
 }
 
+// Apply преобразует изменения в один SQL-батч и выполняет его без повторных попыток.
+// Повтор counter-записи мог бы повторно применить приращение.
 func (t *metricsRepo) Apply(ctx context.Context, changes []metricapp.Change) error {
 	batch, err := makeBatch(changes)
 	if err != nil {
@@ -78,6 +81,7 @@ func makeBatch(changes []metricapp.Change) (pgen.BatchUpsertParam, error) {
 	return batch, nil
 }
 
+// Get возвращает метрику по имени; отсутствие строки преобразует в [metrics.ErrMetricNotFound].
 func (r *metricsRepo) Get(ctx context.Context, metricName string) (metrics.Metrics, error) {
 
 	var metric pgen.MetricMetric
@@ -109,6 +113,7 @@ func newGetMetricError(err error) error {
 	return fmt.Errorf("get metric by name: %w", err)
 }
 
+// GetAll возвращает все сохранённые метрики без гарантии порядка.
 func (r *metricsRepo) GetAll(ctx context.Context) ([]metrics.Metrics, error) {
 
 	var listedMetrics []pgen.MetricMetric

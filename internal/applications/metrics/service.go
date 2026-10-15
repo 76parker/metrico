@@ -1,6 +1,4 @@
-// `metrics/service.go`
-// сервисный слой для работы с метриками.
-// Описывает пользовательские сценарии взаимодействия с метриками.
+// Package metrics реализует сценарии чтения, изменения и сохранения метрик.
 package metrics
 
 import (
@@ -10,19 +8,23 @@ import (
 	"github.com/76Parker/metrico/internal/domain/metrics"
 )
 
-// Repository интерфейс для работы c физическим хранилищем метрик
+// Repository задаёт операции хранения, необходимые сервису метрик.
 type Repository interface {
 	// Apply применяет список изменений к хранилищу метрик (создает либо обновляет),
 	// является единой логикой обновления для single-update и batch-update.
 	Apply(ctx context.Context, mutations []Change) error
+	// Get возвращает метрику по имени или ошибку, если она отсутствует.
 	Get(ctx context.Context, metricName string) (metrics.Metrics, error)
+	// GetAll возвращает текущий набор метрик без гарантии порядка.
 	GetAll(ctx context.Context) ([]metrics.Metrics, error)
 }
 
+// Service проверяет команды и преобразует их в операции выбранного хранилища.
 type Service struct {
 	storage Repository
 }
 
+// NewService создаёт сервис, использующий переданное хранилище для всех операций.
 func NewService(storage Repository) *Service {
 	return &Service{
 		storage: storage,

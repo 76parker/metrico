@@ -1,3 +1,4 @@
+// Package middleware содержит обработку ошибок, сжатие, подписи и журналирование HTTP-запросов.
 package middleware
 
 import (
@@ -52,6 +53,9 @@ func shouldCompress(contentType string) bool {
 	return mediaType == "text/html" || mediaType == "application/json"
 }
 
+// Compress сжимает JSON- и HTML-ответы, если Accept-Encoding в точности равен gzip.
+// Каждый экземпляр middleware владеет пулом gzip.Writer для повторного использования
+// компрессоров без совместного доступа к одному компрессору из разных запросов.
 func Compress() gin.HandlerFunc {
 	// Each middleware instance owns its pool; a request exclusively owns a borrowed writer.
 	pool := &sync.Pool{}

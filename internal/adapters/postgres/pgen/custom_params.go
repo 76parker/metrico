@@ -1,7 +1,7 @@
+// Package pgen содержит sqlc-запросы и параметры доступа к таблице метрик PostgreSQL.
 package pgen
 
-// BatchUpsertMetric это кастомный тип параметра для batch upsert операций
-// Это не сгенерированный sqlc-код
+// BatchUpsertMetric описывает элемент JSON-батча для запроса BatchUpsert.
 type BatchUpsertMetric struct {
 	Name  string   `json:"name"`
 	Type  string   `json:"type"`
@@ -9,8 +9,6 @@ type BatchUpsertMetric struct {
 	Delta *int64   `json:"delta"`
 }
 
-/*
- * BatchUpsertParam это тип который нужно преобразовать в `[]byte` для корректного использования в `BatchUpsert`
- * Создайте и заполните массив `BatchUpsertParam`, затем преобразуйте его в `[]byte` и передайте в `BatchUpsert`
- */
+// BatchUpsertParam задаёт пакет метрик для BatchUpsert.
+// Перед выполнением запроса сериализуйте пакет в JSON-байты.
 type BatchUpsertParam = []BatchUpsertMetric

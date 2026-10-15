@@ -1,5 +1,4 @@
-// `memstorage/metric_storage.go`
-// содержит в себе реализацию хранилища метрик - InMemoryStorage
+// Package memstorage реализует хранилище метрик в памяти процесса.
 package memstorage
 
 import (
@@ -11,6 +10,9 @@ import (
 	"github.com/76Parker/metrico/internal/domain/metrics"
 )
 
+// MemStorage хранит метрики в памяти и синхронизирует операции с ними.
+// Создавайте хранилище через NewMemStorage. Возвращаемые метрики содержат
+// указатели на значения, которые вызывающий код не должен изменять.
 type MemStorage struct {
 	mu      *sync.Mutex
 	metrics map[string]metrics.Metrics
@@ -18,6 +20,7 @@ type MemStorage struct {
 
 var _ metricsapp.Repository = (*MemStorage)(nil)
 
+// NewMemStorage создаёт пустое хранилище метрик, готовое к использованию.
 func NewMemStorage() *MemStorage {
 	reservation := 1024 // Резервируем место в памяти для 1024 метрик, для избежания лишних аллокаций
 	return &MemStorage{
@@ -26,7 +29,7 @@ func NewMemStorage() *MemStorage {
 	}
 }
 
-// Apply применяет пакет изменений метрик.
+// Apply атомарно применяет пакет изменений: ошибочная операция оставляет хранилище прежним.
 func (s *MemStorage) Apply(_ context.Context, changes []metricsapp.Change) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -42,7 +45,7 @@ func (s *MemStorage) Apply(_ context.Context, changes []metricsapp.Change) error
 	return nil
 }
 
-// Get Возвращает метрику по metricName
+// Get возвращает метрику по имени или [metrics.ErrMetricNotFound], если она отсутствует.
 func (s *MemStorage) Get(_ context.Context, metricName string) (metrics.Metrics, error) {
 	if metricName == "" {
 		return metrics.Metrics{}, metrics.ErrMetricNameIsEmpty
@@ -56,6 +59,8 @@ func (s *MemStorage) Get(_ context.Context, metricName string) (metrics.Metrics,
 	return metric, nil
 }
 
+// Load заменяет весь набор метрик переданным снимком без валидации.
+// Значения метрик не копируются глубоко: не изменяйте их после загрузки.
 func (s *MemStorage) Load(_ context.Context, metricsSlice []metrics.Metrics) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -109,7 +114,8 @@ func (s *MemStorage) cloneMetrics() map[string]metrics.Metrics {
 	return clone
 }
 
-// GetAll Возвращает все метрики из хранилища
+// GetAll возвращает снимок набора метрик без гарантии порядка.
+// Срез создаётся заново, значения по указателям остаются общими с хранилищем.
 func (s *MemStorage) GetAll(ctx context.Context) ([]metrics.Metrics, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

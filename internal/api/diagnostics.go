@@ -9,6 +9,8 @@ import (
 )
 
 // NewDiagnosticsServer creates an optional pprof server restricted to numeric loopback addresses.
+// An empty address returns nil, nil. Invalid addresses return an error;
+// the caller is responsible for starting and stopping the returned server.
 func NewDiagnosticsServer(address string) (*http.Server, error) {
 	if address == "" {
 		return nil, nil
