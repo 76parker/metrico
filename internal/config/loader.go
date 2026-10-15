@@ -9,7 +9,8 @@ import (
 )
 
 type Config struct {
-	HttpConfig            HTTP `yaml:"http"`
+	PPROFAddress          string `yaml:"-"`
+	HttpConfig            HTTP   `yaml:"http"`
 	SnapshotServiceConfig SnapshotService
 	Postgres              Postgres
 	Audit                 Audit

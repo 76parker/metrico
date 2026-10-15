@@ -26,6 +26,37 @@ func TestEnvConfig_ApplyOverridesKey(t *testing.T) {
 	}
 }
 
+func TestDiagnosticsConfiguration_FlagsAndEnvironment(t *testing.T) {
+	for _, testCase := range []struct {
+		name        string
+		args        []string
+		environment *string
+		expected    string
+	}{
+		{name: "disabled by default"},
+		{name: "flag", args: []string{"-pprof-address", "127.0.0.1:6060"}, expected: "127.0.0.1:6060"},
+		{name: "environment", environment: new("[::1]:6061"), expected: "[::1]:6061"},
+		{name: "environment overrides flag", args: []string{"-pprof-address", "127.0.0.1:6060"}, environment: new("127.0.0.1:6061"), expected: "127.0.0.1:6061"},
+		{name: "empty environment disables flag", args: []string{"-pprof-address", "127.0.0.1:6060"}, environment: new("")},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Setenv("PPROF_ADDRESS", "")
+			require.NoError(t, os.Unsetenv("PPROF_ADDRESS"))
+			if testCase.environment != nil {
+				t.Setenv("PPROF_ADDRESS", *testCase.environment)
+			}
+			var cfg config.Config
+			flags := flag.NewFlagSet("server", flag.ContinueOnError)
+			registerDiagnosticsFlags(flags, &cfg)
+			require.NoError(t, flags.Parse(testCase.args))
+			configuration, err := env.ParseAs[envConfig]()
+			require.NoError(t, err)
+			configuration.applyDiagnosticsOverrides(&cfg)
+			require.Equal(t, testCase.expected, cfg.PPROFAddress)
+		})
+	}
+}
+
 func TestAuditConfiguration_FlagsAndEnvironment(t *testing.T) {
 	cases := []struct {
 		name        string

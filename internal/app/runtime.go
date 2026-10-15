@@ -30,6 +30,7 @@ type runner interface {
 
 type application struct {
 	server            *http.Server
+	diagnostics       *http.Server
 	backgroundWorkers []runner
 
 	cleanupStack cleanupStack
@@ -65,6 +66,10 @@ func newApplication(ctx context.Context, cfg config.Config, log logger.Logger) (
 			err = errors.Join(err, app.cleanupStack.close())
 		}
 	}()
+	app.diagnostics, err = api.NewDiagnosticsServer(cfg.PPROFAddress)
+	if err != nil {
+		return nil, err
+	}
 
 	auditPublisher, err := newAuditPublisher(cfg.Audit, log, &app.cleanupStack)
 	if err != nil {
@@ -138,10 +143,15 @@ func newAuditPublisher(cfg config.Audit, log logger.Logger, cleanups *cleanupSta
 func (a *application) run(ctx context.Context) error {
 	group, groupCtx := errgroup.WithContext(ctx)
 
-	// Запускаем HTTP сервер в отдельной
-	group.Go(func() error {
-		return a.startHTTPServer()
-	})
+	servers := []*http.Server{a.server}
+	if a.diagnostics != nil {
+		servers = append(servers, a.diagnostics)
+	}
+	for _, server := range servers {
+		group.Go(func() error {
+			return a.startHTTPServer(server)
+		})
+	}
 
 	// Запускаем фоновые сервисы в отдельных горутинах
 	for _, worker := range a.backgroundWorkers {
@@ -160,23 +170,29 @@ func (a *application) run(ctx context.Context) error {
 		<-groupCtx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), a.shutdownTimeout)
 		defer cancel()
-		a.log.Info("Shutting down HTTP server")
-		if err := a.server.Shutdown(shutdownCtx); err != nil {
-			a.log.Error("Failed to shutdown HTTP server", "error", err)
+		var shutdowns errgroup.Group
+		for _, server := range servers {
+			shutdowns.Go(func() error {
+				a.log.Info("Shutting down HTTP server", "addr", server.Addr)
+				if err := server.Shutdown(shutdownCtx); err != nil {
+					return errors.Join(fmt.Errorf("shutdown http %s: %w", server.Addr, err), server.Close())
+				}
+				return nil
+			})
 		}
-		return nil
+		return shutdowns.Wait()
 	})
 	return group.Wait()
 }
 
-func (a *application) startHTTPServer() error {
-	a.log.Info("Starting HTTP server", "addr", a.server.Addr)
-	err := a.server.ListenAndServe()
+func (a *application) startHTTPServer(server *http.Server) error {
+	a.log.Info("Starting HTTP server", "addr", server.Addr)
+	err := server.ListenAndServe()
 	if err != nil {
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
-		return fmt.Errorf("serve http: %w", err)
+		return fmt.Errorf("serve http %s: %w", server.Addr, err)
 	}
 	return nil
 }

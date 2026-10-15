@@ -39,6 +39,7 @@ var (
 )
 
 type envConfig struct {
+	PPROFAddress    string `env:"PPROF_ADDRESS"`
 	Addr            string `env:"ADDRESS"`
 	Key             string `env:"KEY"`
 	FileStoragePath string `env:"FILE_STORAGE_PATH"`
@@ -96,6 +97,7 @@ func main() {
 	flag.BoolVar(&restore, "r", defaultRestore, "restore from file")                   // -r
 	flag.StringVar(&databaseDSN, "d", defaultDatabaseDSN, "database DSN")              // -d
 	registerAuditFlags(flag.CommandLine, &cfg.Audit)
+	registerDiagnosticsFlags(flag.CommandLine, cfg)
 
 	flag.Parse()
 	configFromEnv, err := env.ParseAs[envConfig]()
@@ -104,6 +106,7 @@ func main() {
 	}
 	configFromEnv.applyOverrides()
 	configFromEnv.applyAuditOverrides(&cfg.Audit)
+	configFromEnv.applyDiagnosticsOverrides(cfg)
 
 	if err := validateHostPort(hostPort); err != nil {
 		log.Fatalf("invalid server address: %v", err)
@@ -130,6 +133,16 @@ func main() {
 func registerAuditFlags(flags *flag.FlagSet, auditCfg *config.Audit) {
 	flags.StringVar(&auditCfg.File, "audit-file", "", "Audit log file path")
 	flags.StringVar(&auditCfg.URL, "audit-url", "", "Audit log HTTP endpoint")
+}
+
+func registerDiagnosticsFlags(flags *flag.FlagSet, cfg *config.Config) {
+	flags.StringVar(&cfg.PPROFAddress, "pprof-address", "", "Optional numeric loopback pprof listener address")
+}
+
+func (c *envConfig) applyDiagnosticsOverrides(cfg *config.Config) {
+	if _, hasValue := os.LookupEnv("PPROF_ADDRESS"); hasValue {
+		cfg.PPROFAddress = c.PPROFAddress
+	}
 }
 
 func (c *envConfig) applyAuditOverrides(auditCfg *config.Audit) {
