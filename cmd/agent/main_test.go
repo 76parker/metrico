@@ -2,6 +2,42 @@ package main
 
 import "testing"
 
+func TestFormatBuildInfo(t *testing.T) {
+	tests := []struct {
+		name     string
+		version  string
+		date     string
+		commit   string
+		expected string
+	}{
+		{
+			name:     "provided values",
+			version:  "v1.2.3",
+			date:     "2026-10-19",
+			commit:   "abc123",
+			expected: "Build version: v1.2.3\nBuild date: 2026-10-19\nBuild commit: abc123\n",
+		},
+		{
+			name:     "all values empty",
+			expected: "Build version: N/A\nBuild date: N/A\nBuild commit: N/A\n",
+		},
+		{
+			name:     "some values empty",
+			version:  "v1.2.3",
+			commit:   "abc123",
+			expected: "Build version: v1.2.3\nBuild date: N/A\nBuild commit: abc123\n",
+		},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := formatBuildInfo(testCase.version, testCase.date, testCase.commit); got != testCase.expected {
+				t.Errorf("formatBuildInfo() = %q, want %q", got, testCase.expected)
+			}
+		})
+	}
+}
+
 func TestResolveRateLimit_Default(t *testing.T) {
 	got, err := resolveRateLimit(0, false, 0, false)
 	if err != nil || got != 1 {
