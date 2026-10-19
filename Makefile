@@ -1,6 +1,11 @@
 clean:
 	rm -f coverage.out
 
+.PHONY: staticlint
+
+staticlint:
+	go run ./cmd/staticlint ./...
+
 SUPRESS_OUTPUT = > /dev/null
 
 METRICS_SCHEMA = internal/adapters/filestorage/snapshotschema/metrics-snapshot-v1.schema.json
