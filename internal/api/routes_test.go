@@ -25,7 +25,7 @@ func TestNewHTTPServer_WithHashKey(t *testing.T) {
 	router.POST("/updates", func(c *gin.Context) {
 		c.Data(http.StatusOK, "application/json", responseBody)
 	})
-	server := newHttpServer(config.HTTP{HashKey: key}, router)
+	server := newHTTPServer(config.HTTP{HashKey: key}, router)
 	request := httptest.NewRequest(http.MethodPost, "/updates", bytes.NewReader(requestBody))
 	request.Header.Set(signature.HeaderName, signature.Sum(requestBody, key))
 	response := httptest.NewRecorder()
@@ -57,7 +57,7 @@ func TestMetricsJSONRoutes_AcceptTrailingSlash(t *testing.T) {
 
 	router := gin.New()
 	registerMetricsRoutes(router, handlers.NewMetricsHandler(testMetricsApplication{}), logger.NewMockLogger())
-	server := newHttpServer(config.HTTP{HashKey: key}, router)
+	server := newHTTPServer(config.HTTP{HashKey: key}, router)
 
 	for _, tt := range []struct {
 		name string

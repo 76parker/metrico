@@ -1,12 +1,15 @@
+// Package provider собирает runtime- и системные метрики агента.
 package provider
 
 import (
+	"context"
 	"runtime"
 	"sync"
 	"time"
 )
 
-// MetricProvider собирает и обновляет Runtime-метрики
+// MetricProvider собирает runtime-метрики и число опросов с синхронизацией доступа.
+// Содержит мьютекс и не должен копироваться после использования.
 type MetricProvider struct {
 	metrics           runtime.MemStats
 	mu                sync.Mutex
@@ -15,30 +18,46 @@ type MetricProvider struct {
 	pollInterval      time.Duration
 }
 
+// NewMetricProvider запускает сбор runtime-метрик с заданным положительным интервалом.
+// Сбор работает до завершения процесса; для управления остановкой используйте
+// NewMetricProviderWithContext.
 func NewMetricProvider(pollInterval time.Duration) *MetricProvider {
+	return NewMetricProviderWithContext(context.Background(), pollInterval)
+}
+
+// NewMetricProviderWithContext запускает сбор runtime-метрик до отмены ctx.
+// pollInterval должен быть положительным.
+func NewMetricProviderWithContext(ctx context.Context, pollInterval time.Duration) *MetricProvider {
 
 	p := &MetricProvider{
 		pollInterval: pollInterval,
 	}
-	p.Start()
+	p.Start(ctx)
 	return p
 }
 
-// Start запускает цикл сбора метрик в отдельной горутине (не блокирующая операция)
-func (mp *MetricProvider) Start() {
+// Start запускает неблокирующий цикл сбора до отмены ctx.
+// Конструктор уже запускает цикл; повторный вызов создаёт дополнительный цикл.
+func (mp *MetricProvider) Start(ctx context.Context) {
 	timer := time.NewTicker(mp.pollInterval)
 	go func() {
+		defer timer.Stop()
 		for {
-			<-timer.C
-			mp.mu.Lock()
-			mp.pollCount++
-			runtime.ReadMemStats(&mp.metrics)
-			mp.mu.Unlock()
+			select {
+			case <-timer.C:
+				mp.mu.Lock()
+				mp.pollCount++
+				runtime.ReadMemStats(&mp.metrics)
+				mp.mu.Unlock()
+			case <-ctx.Done():
+				return
+			}
 		}
 	}()
 }
 
-// Metrics возвращает snapshot текущих метрик
+// Metrics возвращает последний снимок runtime-метрик и число опросов с прошлого вызова.
+// Повторное чтение без нового сбора возвращает нулевое приращение PollCount.
 func (mp *MetricProvider) Metrics() (runtime.MemStats, int64) {
 	mp.mu.Lock()
 	defer mp.mu.Unlock()

@@ -10,6 +10,8 @@ import (
 // Тип описывающий список полей для логирования
 type logFields []any
 
+// WithLogging записывает результат HTTP-запроса, его длительность и имя обработчика.
+// Ошибки клиента журналируются с уровнем Warn, остальные ошибки — с уровнем Error.
 func WithLogging(log logger.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		startedAt := time.Now()

@@ -1,3 +1,4 @@
+// Package app собирает зависимости и управляет жизненным циклом сервера метрик.
 package app
 
 import (
@@ -9,7 +10,9 @@ import (
 	"github.com/76Parker/metrico/pkg/logger"
 )
 
-// Run создает и запускает приложение (блокирующая операция)
+// Run создаёт хранилища и HTTP-серверы и работает до отмены ctx или ошибки сервиса.
+// При завершении останавливает серверы и освобождает ресурсы; ошибки запуска,
+// работы и освобождения ресурсов возвращаются вызывающему коду.
 func Run(ctx context.Context, cfg config.Config, log logger.Logger) (err error) {
 	application, err := newApplication(ctx, cfg, log)
 	if err != nil {

@@ -1,3 +1,4 @@
+// Package snapshotschema содержит встроенную JSON Schema и типы файловых снимков.
 package snapshotschema
 
 import _ "embed"

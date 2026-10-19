@@ -1,7 +1,9 @@
+// Package health проверяет доступность зависимостей сервера перед приёмом трафика.
 package health
 
 import "context"
 
+// AvailabilityResult содержит общую готовность приложения и результаты отдельных проверок.
 type AvailabilityResult struct {
 	// Ready показывает доступна ли система в целом принимать трафик на основании результатов проверок
 	Ready bool
@@ -9,6 +11,7 @@ type AvailabilityResult struct {
 	AvailabilityResults []CheckResult
 }
 
+// CheckResult описывает доступность одной внешней системы и причину отказа.
 type CheckResult struct {
 	// System содержит название системы, которая была проверена (например, "postgres")
 	System string
@@ -18,14 +21,17 @@ type CheckResult struct {
 	Error error
 }
 
+// Application проверяет доступность настроенного соединения с хранилищем.
 type Application struct {
 	db dbPinger
 }
 
+// NewApplication создаёт проверку доступности через переданную операцию Ping.
 func NewApplication(db dbPinger) *Application {
 	return &Application{db: db}
 }
 
+// CheckAvailability выполняет Ping и возвращает готовность вместе с причиной ошибки.
 func (s *Application) CheckAvailability(ctx context.Context) AvailabilityResult {
 	err := s.db.Ping(ctx)
 	result := AvailabilityResult{

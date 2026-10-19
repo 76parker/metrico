@@ -12,10 +12,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/caarlos0/env/v11"
+
 	"github.com/76Parker/metrico/internal/app"
 	"github.com/76Parker/metrico/internal/config"
 	"github.com/76Parker/metrico/pkg/logger"
-	"github.com/caarlos0/env/v11"
 )
 
 // Default values for flags
@@ -38,12 +39,15 @@ var (
 )
 
 type envConfig struct {
+	PPROFAddress    string `env:"PPROF_ADDRESS"`
 	Addr            string `env:"ADDRESS"`
 	Key             string `env:"KEY"`
 	FileStoragePath string `env:"FILE_STORAGE_PATH"`
 	StoreInterval   int    `env:"STORE_INTERVAL"`
 	Restore         bool   `env:"RESTORE"`
 	DatabaseDSN     string `env:"DATABASE_DSN"`
+	AuditFile       string `env:"AUDIT_FILE"`
+	AuditURL        string `env:"AUDIT_URL"`
 }
 
 func (c *envConfig) applyOverrides() {
@@ -92,6 +96,8 @@ func main() {
 	flag.IntVar(&storeInterval, "i", defaultStoreInterval, "store interval")           // -i
 	flag.BoolVar(&restore, "r", defaultRestore, "restore from file")                   // -r
 	flag.StringVar(&databaseDSN, "d", defaultDatabaseDSN, "database DSN")              // -d
+	registerAuditFlags(flag.CommandLine, &cfg.Audit)
+	registerDiagnosticsFlags(flag.CommandLine, cfg)
 
 	flag.Parse()
 	configFromEnv, err := env.ParseAs[envConfig]()
@@ -99,13 +105,15 @@ func main() {
 		log.Fatal("error parsing env:", err)
 	}
 	configFromEnv.applyOverrides()
+	configFromEnv.applyAuditOverrides(&cfg.Audit)
+	configFromEnv.applyDiagnosticsOverrides(cfg)
 
 	if err := validateHostPort(hostPort); err != nil {
 		log.Fatalf("invalid server address: %v", err)
 	}
 
-	cfg.HttpConfig.Address = hostPort
-	cfg.HttpConfig.HashKey = key
+	cfg.HTTPConfig.Address = hostPort
+	cfg.HTTPConfig.HashKey = key
 	cfg.SnapshotServiceConfig = config.SnapshotService{
 		StoreInterval:   time.Duration(storeInterval) * time.Second,
 		FileStoragePath: fileStoragePath,
@@ -119,6 +127,30 @@ func main() {
 
 	if err := app.Run(ctx, *cfg, applicationLog); err != nil {
 		log.Fatal("error running application:", err)
+	}
+}
+
+func registerAuditFlags(flags *flag.FlagSet, auditCfg *config.Audit) {
+	flags.StringVar(&auditCfg.File, "audit-file", "", "Audit log file path")
+	flags.StringVar(&auditCfg.URL, "audit-url", "", "Audit log HTTP endpoint")
+}
+
+func registerDiagnosticsFlags(flags *flag.FlagSet, cfg *config.Config) {
+	flags.StringVar(&cfg.PPROFAddress, "pprof-address", "", "Optional numeric loopback pprof listener address")
+}
+
+func (c *envConfig) applyDiagnosticsOverrides(cfg *config.Config) {
+	if _, hasValue := os.LookupEnv("PPROF_ADDRESS"); hasValue {
+		cfg.PPROFAddress = c.PPROFAddress
+	}
+}
+
+func (c *envConfig) applyAuditOverrides(auditCfg *config.Audit) {
+	if _, hasValue := os.LookupEnv("AUDIT_FILE"); hasValue {
+		auditCfg.File = c.AuditFile
+	}
+	if _, hasValue := os.LookupEnv("AUDIT_URL"); hasValue {
+		auditCfg.URL = c.AuditURL
 	}
 }
 

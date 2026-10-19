@@ -1,4 +1,4 @@
-// Пакет содержит в себе регистрацию HTTP маршрутов для API и инициализацию HTTP сервера
+// Package api собирает HTTP-маршруты сервера метрик и диагностики.
 package api
 
 import (
@@ -11,17 +11,20 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// NewRouter создаёт HTTP-сервер с маршрутами метрик и проверки доступности.
+// Сервер ещё не слушает порт. Шаблоны загружаются из templates/* относительно
+// текущего каталога; при отсутствии шаблонов Gin вызывает panic.
 func NewRouter(
 	metricsHandler *handlers.MetricsHandler,
 	healthHandler *handlers.HealthHandler,
 	httpCfg config.HTTP,
 	log logger.Logger,
 ) *http.Server {
-	router := registerHttpRoutes(metricsHandler, healthHandler, log)
-	return newHttpServer(httpCfg, router)
+	router := registerHTTPRoutes(metricsHandler, healthHandler, log)
+	return newHTTPServer(httpCfg, router)
 }
 
-func newHttpServer(cfg config.HTTP, router *gin.Engine) *http.Server {
+func newHTTPServer(cfg config.HTTP, router *gin.Engine) *http.Server {
 	return &http.Server{
 		Addr:              cfg.Address,
 		Handler:           middleware.VerifyAndSign(router, cfg.HashKey),
@@ -33,7 +36,7 @@ func newHttpServer(cfg config.HTTP, router *gin.Engine) *http.Server {
 	}
 }
 
-func registerHttpRoutes(
+func registerHTTPRoutes(
 	metricsHandler *handlers.MetricsHandler,
 	healthHandler *handlers.HealthHandler,
 	log logger.Logger,

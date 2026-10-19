@@ -14,6 +14,8 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 )
 
+// Migrate применяет все недостающие миграции из указанного каталога.
+// Отсутствие новых миграций считается успешным результатом.
 func (r *Repository) Migrate(ctx context.Context, migrationDir string) error {
 	if err := ctx.Err(); err != nil {
 		return err

@@ -1,3 +1,4 @@
+// Package filestorage сохраняет и восстанавливает проверяемые JSON-снимки метрик.
 package filestorage
 
 import (
@@ -16,12 +17,16 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
+// Storage сохраняет и восстанавливает JSON-снимки метрик с проверкой схемы.
+// Содержит мьютекс и не должен копироваться после использования.
 type Storage struct {
 	fileStoragePath string
 	schema          *jsonschema.Schema
 	mu              sync.Mutex
 }
 
+// NewStorage подготавливает файловое хранилище и компилирует встроенную JSON Schema.
+// Файл снимка открывается только при Save или Restore.
 func NewStorage(fileStoragePath string) (*Storage, error) {
 
 	compiler := jsonschema.NewCompiler()
@@ -47,6 +52,8 @@ func NewStorage(fileStoragePath string) (*Storage, error) {
 	}, nil
 }
 
+// Save проверяет снимок по JSON Schema и записывает его через временный файл
+// с последующим переименованием. Каталог назначения должен существовать.
 func (s *Storage) Save(ctx context.Context, metricsSlice []metrics.Metrics) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -77,6 +84,8 @@ func (s *Storage) Save(ctx context.Context, metricsSlice []metrics.Metrics) erro
 	return nil
 }
 
+// Restore читает снимок и проверяет его по JSON Schema.
+// Для отсутствующего или пустого файла возвращает пустой набор метрик.
 func (s *Storage) Restore(ctx context.Context) ([]metrics.Metrics, error) {
 	rawFile, err := os.ReadFile(s.fileStoragePath)
 	if err != nil {

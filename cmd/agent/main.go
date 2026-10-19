@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -21,11 +22,13 @@ const (
 	defaultPollInterval   = 2 * time.Second
 	defaultReportInterval = 10 * time.Second
 	defaultAddr           = "http://localhost:8080"
+	defaultRateLimit      = 1
 )
 
 var (
 	pollInterval   time.Duration
 	reportInterval time.Duration
+	rateLimit      int
 	addr           string
 	key            string
 )
@@ -35,6 +38,7 @@ type envConfig struct {
 	Key            string `env:"KEY"`
 	PollInterval   int    `env:"POLL_INTERVAL"`
 	ReportInterval int    `env:"REPORT_INTERVAL"`
+	RateLimit      int    `env:"RATE_LIMIT"`
 }
 
 func (e *envConfig) redefineConfigFromEnv() {
@@ -52,6 +56,20 @@ func (e *envConfig) redefineConfigFromEnv() {
 	}
 }
 
+func resolveRateLimit(flagValue int, flagSet bool, envValue int, envSet bool) (int, error) {
+	value := defaultRateLimit
+	if envSet {
+		value = envValue
+	}
+	if flagSet {
+		value = flagValue
+	}
+	if value <= 0 {
+		return 0, fmt.Errorf("rate limit must be positive")
+	}
+	return value, nil
+}
+
 func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -61,6 +79,7 @@ func main() {
 	flag.StringVar(&key, "k", "", "Hash key")
 	flag.IntVar(&pollSeconds, "p", int(defaultPollInterval/time.Second), "Poll interval for metric provider in seconds")
 	flag.IntVar(&reportSeconds, "r", int(defaultReportInterval/time.Second), "Report interval for metric reporter in seconds")
+	flag.IntVar(&rateLimit, "l", defaultRateLimit, "Maximum concurrent outgoing requests")
 	flag.Parse()
 
 	pollInterval = time.Duration(pollSeconds) * time.Second
@@ -71,6 +90,17 @@ func main() {
 		log.Fatalf("parse config from env error: %v", err)
 	}
 	envCfg.redefineConfigFromEnv()
+	flagRateLimitSet := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "l" {
+			flagRateLimitSet = true
+		}
+	})
+	_, rateLimitEnvSet := os.LookupEnv("RATE_LIMIT")
+	rateLimit, err = resolveRateLimit(rateLimit, flagRateLimitSet, envCfg.RateLimit, rateLimitEnvSet)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	httpClient := &http.Client{
 		Timeout: 5 * time.Second,
@@ -78,8 +108,17 @@ func main() {
 	if !strings.HasPrefix(addr, "http://") && !strings.HasPrefix(addr, "https://") {
 		addr = "http://" + addr
 	}
-	provider := provider.NewMetricProvider(pollInterval)
-	reporter := reporter.NewMetricReporter(addr, httpClient, provider, reportInterval, key)
+	runtimeProvider := provider.NewMetricProviderWithContext(ctx, pollInterval)
+	systemProvider := provider.NewSystemMetricProviderWithContext(ctx, pollInterval)
+	reporter := reporter.NewMetricReporter(
+		addr,
+		reporter.WithHTTPClient(httpClient),
+		reporter.WithMetricProvider(runtimeProvider),
+		reporter.WithReportInterval(reportInterval),
+		reporter.WithKey(key),
+		reporter.WithRateLimit(rateLimit),
+		reporter.WithSystemMetricProvider(systemProvider),
+	)
 	if err := reporter.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		log.Fatal(err)
 	}

@@ -5,7 +5,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// ErrorHandler middleware для обработки ошибок которые произошли в handler'ах
+// ErrorHandler преобразует последнюю ошибку Gin в JSON с кодом и HTTP-статусом.
+// Если ответ уже записан, middleware не изменяет его.
 func ErrorHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Next()

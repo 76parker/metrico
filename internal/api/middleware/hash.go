@@ -9,8 +9,6 @@ import (
 	"github.com/76Parker/metrico/internal/signature"
 )
 
-const HashSHA256Header = signature.HeaderName
-
 const maxBodySize = 1 << 20
 
 type responseBuffer struct {
@@ -48,13 +46,16 @@ func (b *responseBuffer) WriteString(data string) (int, error) {
 	return b.Write([]byte(data))
 }
 
+// VerifyAndSign проверяет переданную подпись HashSHA256 и подписывает тело ответа.
+// Запросы без подписи допускаются; неверная подпись даёт HTTP 400.
+// При пустом ключе возвращает next без дополнительной обработки.
 func VerifyAndSign(next http.Handler, key string) http.Handler {
 	if key == "" {
 		return next
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if actualSignature := r.Header.Get(HashSHA256Header); actualSignature != "" {
+		if actualSignature := r.Header.Get(signature.HeaderName); actualSignature != "" {
 			body, err := readAndRestoreBody(w, r)
 			if err != nil || !isValidSignature(actualSignature, body, key) {
 				writeSignedResponse(w, http.StatusBadRequest, nil, key, r.Method)
@@ -111,7 +112,7 @@ func writeSignedResponse(
 	if !responseBodyAllowed(requestMethod, status) {
 		body = nil
 	}
-	w.Header().Set(HashSHA256Header, signature.Sum(body, key))
+	w.Header().Set(signature.HeaderName, signature.Sum(body, key))
 	w.WriteHeader(status)
 	if len(body) == 0 {
 		return
@@ -129,7 +130,7 @@ func responseBodyAllowed(requestMethod string, status int) bool {
 		return false
 	}
 
-	return status < http.StatusContinue || status >= http.StatusOK
+	return status >= http.StatusOK
 }
 
 func copyHeaders(destination http.Header, source http.Header) {
