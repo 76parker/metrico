@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/76Parker/metrico/internal/adapters/audit"
-	auditapp "github.com/76Parker/metrico/internal/applications/audit"
+	"github.com/76Parker/metrico/internal/applications/auditobserver"
 )
 
 type roundTripperFunc func(*http.Request) (*http.Response, error)
@@ -27,17 +27,17 @@ func (transport roundTripperFunc) RoundTrip(request *http.Request) (*http.Respon
 
 func TestHTTP_Notify_PostsEvent(t *testing.T) {
 	t.Parallel()
-	expected := auditapp.Event{TS: 12345678, Metrics: []string{"Alloc", "Frees"}, IPAddress: "192.168.0.42"}
+	expected := auditobserver.Event{TS: 12345678, Metrics: []string{"Alloc", "Frees"}, IPAddress: "192.168.0.42"}
 	type receivedRequest struct {
 		method      string
 		contentType string
 		path        string
-		event       auditapp.Event
+		event       auditobserver.Event
 		err         error
 	}
 	received := make(chan receivedRequest, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var event auditapp.Event
+		var event auditobserver.Event
 		err := json.NewDecoder(r.Body).Decode(&event)
 		received <- receivedRequest{r.Method, r.Header.Get("Content-Type"), r.URL.RequestURI(), event, err}
 		w.WriteHeader(http.StatusNoContent)
@@ -67,7 +67,7 @@ func TestHTTP_Notify_ChecksResponseStatus(t *testing.T) {
 			receiver, err := audit.NewHTTP(server.URL, server.Client())
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, receiver.Close()) })
-			err = receiver.Notify(context.Background(), auditapp.Event{})
+			err = receiver.Notify(context.Background(), auditobserver.Event{})
 			if status >= 200 && status < 300 {
 				require.NoError(t, err)
 				return
@@ -101,7 +101,7 @@ func TestHTTP_Notify_RespectsCancellationAndTimeout(t *testing.T) {
 					cancel()
 					expectedErr = context.Canceled
 				}
-				require.ErrorIs(t, receiver.Notify(ctx, auditapp.Event{}), expectedErr)
+				require.ErrorIs(t, receiver.Notify(ctx, auditobserver.Event{}), expectedErr)
 			})
 		})
 	}
@@ -129,7 +129,7 @@ func TestHTTP_Notify_ClosesResponseBody(t *testing.T) {
 			})}
 			receiver, err := audit.NewHTTP("http://receiver.example/audit", client)
 			require.NoError(t, err)
-			require.ErrorIs(t, receiver.Notify(context.Background(), auditapp.Event{}), closeErr)
+			require.ErrorIs(t, receiver.Notify(context.Background(), auditobserver.Event{}), closeErr)
 			require.True(t, body.isClosed)
 		})
 	}

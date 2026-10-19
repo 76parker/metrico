@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"net/url"
 
-	auditapp "github.com/76Parker/metrico/internal/applications/audit"
+	auditobserver "github.com/76Parker/metrico/internal/applications/auditobserver"
 )
 
 // HTTP posts audit events using a shared client.
@@ -35,7 +35,7 @@ func NewHTTP(endpoint string, client *http.Client) (*HTTP, error) {
 }
 
 // Notify posts the event and accepts only successful HTTP responses.
-func (h *HTTP) Notify(ctx context.Context, event auditapp.Event) (err error) {
+func (h *HTTP) Notify(ctx context.Context, event auditobserver.Event) (err error) {
 	data, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("marshal http audit event: %w", err)

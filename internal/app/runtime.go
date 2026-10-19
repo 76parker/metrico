@@ -16,7 +16,7 @@ import (
 	"github.com/76Parker/metrico/internal/adapters/postgres"
 	"github.com/76Parker/metrico/internal/api"
 	"github.com/76Parker/metrico/internal/api/handlers"
-	"github.com/76Parker/metrico/internal/applications/audit"
+	"github.com/76Parker/metrico/internal/applications/auditobserver"
 	"github.com/76Parker/metrico/internal/applications/health"
 	"github.com/76Parker/metrico/internal/applications/metrics"
 	"github.com/76Parker/metrico/internal/config"
@@ -109,11 +109,11 @@ func newApplication(ctx context.Context, cfg config.Config, log logger.Logger) (
 	return app, nil
 }
 
-func newAuditPublisher(cfg config.Audit, log logger.Logger, cleanups *cleanupStack) (*audit.Publisher, error) {
+func newAuditPublisher(cfg config.Audit, log logger.Logger, cleanups *cleanupStack) (*auditobserver.Publisher, error) {
 	if cfg.File == "" && cfg.URL == "" {
 		return nil, nil
 	}
-	observers := make([]audit.Observer, 0, 2)
+	observers := make([]auditobserver.Observer, 0, 2)
 	if cfg.File != "" {
 		file, err := auditadapter.NewFile(cfg.File)
 		if err != nil {
@@ -137,7 +137,7 @@ func newAuditPublisher(cfg config.Audit, log logger.Logger, cleanups *cleanupSta
 		cleanups.add(remote.Close)
 		observers = append(observers, remote)
 	}
-	return audit.NewPublisher(log, observers...)
+	return auditobserver.NewPublisher(log, observers...)
 }
 
 func (a *application) run(ctx context.Context) error {
