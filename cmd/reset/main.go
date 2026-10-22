@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"text/template"
 
 	"golang.org/x/tools/go/packages"
 )
@@ -262,37 +263,39 @@ func receiverTypeName(expression ast.Expr) string {
 }
 
 func renderPackage(pkg *packages.Package, generatedTypes []generatedType) ([]byte, error) {
-	var source strings.Builder
-	source.WriteString(generatedHeader)
-	source.WriteString("package ")
-	source.WriteString(pkg.Name)
-	source.WriteString("\n\n")
-
-	zeroHelperName := packageHelperName(pkg)
+	data := packageTemplateData{
+		Header:         generatedHeader,
+		PackageName:    pkg.Name,
+		Types:          make([]resetTemplateData, 0, len(generatedTypes)),
+		ZeroHelperName: packageHelperName(pkg),
+	}
 	for _, generatedType := range generatedTypes {
+		receiverType := generatedType.name
 		if generatedType.typeSpec.TypeParams != nil && len(generatedType.typeSpec.TypeParams.List) > 0 {
-			fmt.Fprintf(&source, "// Reset restores the fields of %s to their initial state.\n", generatedType.name)
-			fmt.Fprintf(&source, "func (r *%s[%s]) Reset() {\n", generatedType.name, typeParameterNames(generatedType.typeSpec.TypeParams))
-		} else {
-			fmt.Fprintf(&source, "// Reset restores the fields of %s to their initial state.\n", generatedType.name)
-			fmt.Fprintf(&source, "func (r *%s) Reset() {\n", generatedType.name)
+			receiverType += "[" + typeParameterNames(generatedType.typeSpec.TypeParams) + "]"
 		}
-		source.WriteString("\tif r == nil {\n\t\treturn\n\t}\n")
-
+		resetData := resetTemplateData{
+			Name:         generatedType.name,
+			ReceiverType: receiverType,
+			Statements:   make([]string, 0, generatedType.structure.NumFields()),
+		}
 		for fieldIndex := 0; fieldIndex < generatedType.structure.NumFields(); fieldIndex++ {
 			field := generatedType.structure.Field(fieldIndex)
-			fieldExpression := "r." + field.Name()
-			statements := resetStatements(fieldExpression, field.Type(), zeroHelperName, 1)
-			for _, statement := range statements {
-				source.WriteString(statement)
-				source.WriteByte('\n')
-			}
+			statements := resetStatements("r."+field.Name(), field.Type(), data.ZeroHelperName, 1)
+			resetData.Statements = append(resetData.Statements, statements...)
 		}
-		source.WriteString("}\n\n")
+		data.Types = append(data.Types, resetData)
 	}
 
-	fmt.Fprintf(&source, "func %s[T any](_ T) T {\n\tvar zero T\n\treturn zero\n}\n", zeroHelperName)
-	return []byte(source.String()), nil
+	resetTemplate, err := template.New("reset").Parse(resetSourceTemplate)
+	if err != nil {
+		return nil, fmt.Errorf("parse reset template: %w", err)
+	}
+	var source bytes.Buffer
+	if err := resetTemplate.Execute(&source, data); err != nil {
+		return nil, fmt.Errorf("execute reset template: %w", err)
+	}
+	return source.Bytes(), nil
 }
 
 func resetStatements(expression string, fieldType types.Type, zeroHelperName string, indentation int) []string {

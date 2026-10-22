@@ -13,9 +13,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/caarlos0/env/v11"
+
 	"github.com/76Parker/metrico/internal/agent/provider"
 	"github.com/76Parker/metrico/internal/agent/reporter"
-	"github.com/caarlos0/env/v11"
+	"github.com/76Parker/metrico/internal/buildinfo"
 )
 
 const (
@@ -26,9 +28,9 @@ const (
 )
 
 var (
-	buildVersion string
-	buildDate    string
-	buildCommit  string
+	buildVersion = buildinfo.Unknown
+	buildDate    = buildinfo.Unknown
+	buildCommit  = buildinfo.Unknown
 
 	pollInterval   time.Duration
 	reportInterval time.Duration
@@ -75,7 +77,7 @@ func resolveRateLimit(flagValue int, flagSet bool, envValue int, envSet bool) (i
 }
 
 func main() {
-	fmt.Print(formatBuildInfo(buildVersion, buildDate, buildCommit))
+	fmt.Print(buildinfo.Format(buildVersion, buildDate, buildCommit))
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -130,20 +132,6 @@ func main() {
 	if err := metricReporter.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		log.Fatal(err)
 	}
-}
-
-func formatBuildInfo(version, date, commit string) string {
-	if version == "" {
-		version = "N/A"
-	}
-	if date == "" {
-		date = "N/A"
-	}
-	if commit == "" {
-		commit = "N/A"
-	}
-
-	return fmt.Sprintf("Build version: %s\nBuild date: %s\nBuild commit: %s\n", version, date, commit)
 }
 
 func applyEnvOverrides() (envConfig, error) {

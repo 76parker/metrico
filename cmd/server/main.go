@@ -15,6 +15,7 @@ import (
 	"github.com/caarlos0/env/v11"
 
 	"github.com/76Parker/metrico/internal/app"
+	"github.com/76Parker/metrico/internal/buildinfo"
 	"github.com/76Parker/metrico/internal/config"
 	"github.com/76Parker/metrico/pkg/logger"
 )
@@ -30,9 +31,9 @@ const (
 
 // Application configuration flags
 var (
-	buildVersion string
-	buildDate    string
-	buildCommit  string
+	buildVersion = buildinfo.Unknown
+	buildDate    = buildinfo.Unknown
+	buildCommit  = buildinfo.Unknown
 
 	hostPort        string // -a (or ADDRESS env var)
 	fileStoragePath string // -f (or FILE_STORAGE_PATH env var)
@@ -76,7 +77,7 @@ func (c *envConfig) applyOverrides() {
 }
 
 func main() {
-	fmt.Print(formatBuildInfo(buildVersion, buildDate, buildCommit))
+	fmt.Print(buildinfo.Format(buildVersion, buildDate, buildCommit))
 
 	ctx, stop := signal.NotifyContext(
 		context.Background(),
@@ -134,20 +135,6 @@ func main() {
 	if err := app.Run(ctx, *cfg, applicationLog); err != nil {
 		log.Fatal("error running application:", err)
 	}
-}
-
-func formatBuildInfo(version, date, commit string) string {
-	if version == "" {
-		version = "N/A"
-	}
-	if date == "" {
-		date = "N/A"
-	}
-	if commit == "" {
-		commit = "N/A"
-	}
-
-	return fmt.Sprintf("Build version: %s\nBuild date: %s\nBuild commit: %s\n", version, date, commit)
 }
 
 func registerAuditFlags(flags *flag.FlagSet, auditCfg *config.Audit) {

@@ -7,6 +7,37 @@
 1. Склонируйте репозиторий в любую подходящую директорию на вашем компьютере.
 2. В корне репозитория выполните команду `go mod init <name>` (где `<name>` — адрес вашего репозитория на GitHub без префикса `https://`) для создания модуля.
 
+## Сборка агента и сервера
+
+Обычная сборка из корня репозитория:
+
+```bash
+go build -o cmd/agent/agent ./cmd/agent
+go build -o cmd/server/server ./cmd/server
+```
+
+Чтобы включить метаданные сборки, передайте значения переменных пакета `main` через `-ldflags`:
+
+```bash
+BUILD_VERSION=v1.2.3
+BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+BUILD_COMMIT=$(git rev-parse HEAD)
+
+go build -ldflags "-X main.buildVersion=${BUILD_VERSION} -X main.buildDate=${BUILD_DATE} -X main.buildCommit=${BUILD_COMMIT}" -o cmd/agent/agent ./cmd/agent
+go build -ldflags "-X main.buildVersion=${BUILD_VERSION} -X main.buildDate=${BUILD_DATE} -X main.buildCommit=${BUILD_COMMIT}" -o cmd/server/server ./cmd/server
+```
+
+При запуске оба приложения выводят в stdout три строки, например:
+
+```text
+Build version: v1.2.3
+Build date: 2026-10-21T10:00:00Z
+Build commit: 136d122
+```
+
+При обычной сборке без `-ldflags` все три значения равны `N/A`. Пустое значение, переданное через `-X`, также заменяется на `N/A`.
+Для проверки вывода без запуска сервиса используйте `./cmd/agent/agent -h` или `./cmd/server/server -h`.
+
 ## Обновление шаблона
 
 Чтобы иметь возможность получать обновления автотестов и других частей шаблона, выполните команду:

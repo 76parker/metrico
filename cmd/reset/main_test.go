@@ -17,6 +17,7 @@ func TestGenerate_WritesResetMethodsAndIsIdempotent(t *testing.T) {
 	writeFixtureFile(t, root, "fixture/model.go", `package fixture
 
 var resetCalls int
+var resetZeroValue int
 
 type nested struct {
 	value int
@@ -157,6 +158,9 @@ func TestGeneratedReset(t *testing.T) {
 	}
 	if !bytes.Contains(firstGeneration, []byte("func (r *state[T]) Reset()")) {
 		t.Fatal("generated file does not contain the generic Reset method")
+	}
+	if !bytes.Contains(firstGeneration, []byte("func resetZeroValue1[T any]")) {
+		t.Fatal("generated helper name conflicts with an existing declaration")
 	}
 	if err := generate(root); err != nil {
 		t.Fatalf("regenerate reset methods: %v", err)

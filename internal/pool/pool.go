@@ -14,7 +14,14 @@ type Pool[T Resettable] struct {
 }
 
 // New creates a pool that calls factory when no value is available.
+// If factory is nil, the pool returns the zero value of T instead.
 func New[T Resettable](factory func() T) *Pool[T] {
+	if factory == nil {
+		factory = func() T {
+			var zero T
+			return zero
+		}
+	}
 	return &Pool[T]{
 		values: sync.Pool{
 			New: func() any {
@@ -25,8 +32,14 @@ func New[T Resettable](factory func() T) *Pool[T] {
 }
 
 // Get returns a pooled value or creates one with the configured factory.
+// Without a factory, it returns the zero value of T when the pool is empty.
 func (p *Pool[T]) Get() T {
-	return p.values.Get().(T)
+	value := p.values.Get()
+	if value == nil {
+		var zero T
+		return zero
+	}
+	return value.(T)
 }
 
 // Put resets value and makes it available for reuse.
