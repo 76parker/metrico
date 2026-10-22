@@ -1,5 +1,5 @@
-// Package audit publishes events about successfully received metrics.
-package audit
+// Package auditobserver publishes events about successfully received metrics.
+package auditobserver
 
 // Event describes the metrics accepted in one HTTP request.
 type Event struct {

@@ -7,6 +7,37 @@
 1. Склонируйте репозиторий в любую подходящую директорию на вашем компьютере.
 2. В корне репозитория выполните команду `go mod init <name>` (где `<name>` — адрес вашего репозитория на GitHub без префикса `https://`) для создания модуля.
 
+## Сборка агента и сервера
+
+Обычная сборка из корня репозитория:
+
+```bash
+go build -o cmd/agent/agent ./cmd/agent
+go build -o cmd/server/server ./cmd/server
+```
+
+Чтобы включить метаданные сборки, передайте значения переменных пакета `main` через `-ldflags`:
+
+```bash
+BUILD_VERSION=v1.2.3
+BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+BUILD_COMMIT=$(git rev-parse HEAD)
+
+go build -ldflags "-X main.buildVersion=${BUILD_VERSION} -X main.buildDate=${BUILD_DATE} -X main.buildCommit=${BUILD_COMMIT}" -o cmd/agent/agent ./cmd/agent
+go build -ldflags "-X main.buildVersion=${BUILD_VERSION} -X main.buildDate=${BUILD_DATE} -X main.buildCommit=${BUILD_COMMIT}" -o cmd/server/server ./cmd/server
+```
+
+При запуске оба приложения выводят в stdout три строки, например:
+
+```text
+Build version: v1.2.3
+Build date: 2026-10-21T10:00:00Z
+Build commit: 136d122
+```
+
+При обычной сборке без `-ldflags` все три значения равны `N/A`. Пустое значение, переданное через `-X`, также заменяется на `N/A`.
+Для проверки вывода без запуска сервиса используйте `./cmd/agent/agent -h` или `./cmd/server/server -h`.
+
 ## Обновление шаблона
 
 Чтобы иметь возможность получать обновления автотестов и других частей шаблона, выполните команду:
@@ -60,6 +91,8 @@ git fetch template && git checkout template/v2 .github
 | `alloc_space`, MiB | 6554,02 | 4686,93 | −1867,09 (−28,49%) |
 | `alloc_objects`, объектов | 39 981 899 | 42 502 276 | +2 520 377 (+6,30%) |
 | `inuse_space` после GC, KiB | 4395,84 | 5669,49 | +1273,65 (+28,97%) |
+
+Рост `inuse_space` ожидаем: `sync.Pool` удерживает часть gzip-компрессоров для повторного использования, поэтому после GC остаётся больше занятой памяти. При этом `alloc_objects` вырос на 6,30%, и это требует отдельной перепроверки: в том же изменении добавлены аудит событий и пул воркеров агента, которые тоже могут влиять на число аллокаций. Снижение `alloc_space` показывает уменьшение объёма выделенной памяти, но само по себе не доказывает, что оптимизация снизила общее число аллокаций; для такого вывода нужно сравнить эквивалентные нагрузки и отдельно учесть вклад новых компонентов.
 
 Вывод команды `pprof -top -diff_base=profiles/base.pprof profiles/result.pprof`:
 

@@ -13,9 +13,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/caarlos0/env/v11"
+
 	"github.com/76Parker/metrico/internal/agent/provider"
 	"github.com/76Parker/metrico/internal/agent/reporter"
-	"github.com/caarlos0/env/v11"
+	"github.com/76Parker/metrico/internal/buildinfo"
 )
 
 const (
@@ -26,6 +28,10 @@ const (
 )
 
 var (
+	buildVersion = buildinfo.Unknown
+	buildDate    = buildinfo.Unknown
+	buildCommit  = buildinfo.Unknown
+
 	pollInterval   time.Duration
 	reportInterval time.Duration
 	rateLimit      int
@@ -71,6 +77,7 @@ func resolveRateLimit(flagValue int, flagSet bool, envValue int, envSet bool) (i
 }
 
 func main() {
+	fmt.Print(buildinfo.Format(buildVersion, buildDate, buildCommit))
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -110,7 +117,7 @@ func main() {
 	}
 	runtimeProvider := provider.NewMetricProviderWithContext(ctx, pollInterval)
 	systemProvider := provider.NewSystemMetricProviderWithContext(ctx, pollInterval)
-	reporter := reporter.NewMetricReporter(
+	metricReporter, err := reporter.NewMetricReporter(
 		addr,
 		reporter.WithHTTPClient(httpClient),
 		reporter.WithMetricProvider(runtimeProvider),
@@ -119,7 +126,10 @@ func main() {
 		reporter.WithRateLimit(rateLimit),
 		reporter.WithSystemMetricProvider(systemProvider),
 	)
-	if err := reporter.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+	if err != nil {
+		log.Fatalf("initialize metric reporter: %v", err)
+	}
+	if err := metricReporter.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		log.Fatal(err)
 	}
 }

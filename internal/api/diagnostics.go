@@ -8,9 +8,7 @@ import (
 	"time"
 )
 
-// NewDiagnosticsServer creates an optional pprof server restricted to numeric loopback addresses.
-// An empty address returns nil, nil. Invalid addresses return an error;
-// the caller is responsible for starting and stopping the returned server.
+// NewDiagnosticsServer создает опциональный pprof-сервер для профилирования.
 func NewDiagnosticsServer(address string) (*http.Server, error) {
 	if address == "" {
 		return nil, nil

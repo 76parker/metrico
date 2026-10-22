@@ -14,7 +14,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/76Parker/metrico/internal/adapters/audit"
-	auditapp "github.com/76Parker/metrico/internal/applications/audit"
+	"github.com/76Parker/metrico/internal/applications/auditobserver"
 )
 
 func TestFile_Notify_AppendsJSONLines(t *testing.T) {
@@ -24,7 +24,7 @@ func TestFile_Notify_AppendsJSONLines(t *testing.T) {
 	receiver, err := audit.NewFile(path)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, receiver.Close()) })
-	event := auditapp.Event{TS: 12345678, Metrics: []string{"Alloc", "Frees"}, IPAddress: "192.168.0.42"}
+	event := auditobserver.Event{TS: 12345678, Metrics: []string{"Alloc", "Frees"}, IPAddress: "192.168.0.42"}
 	require.NoError(t, receiver.Notify(context.Background(), event))
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
@@ -48,7 +48,7 @@ func TestFile_Notify_SerializesConcurrentWrites(t *testing.T) {
 	group, ctx := errgroup.WithContext(context.Background())
 	for i := range eventCount {
 		group.Go(func() error {
-			return receiver.Notify(ctx, auditapp.Event{
+			return receiver.Notify(ctx, auditobserver.Event{
 				TS:        int64(i),
 				Metrics:   []string{strconv.Itoa(i)},
 				IPAddress: "::1",
@@ -62,7 +62,7 @@ func TestFile_Notify_SerializesConcurrentWrites(t *testing.T) {
 	scanner := bufio.NewScanner(strings.NewReader(string(data)))
 	received := make(map[int64]bool, eventCount)
 	for scanner.Scan() {
-		var event auditapp.Event
+		var event auditobserver.Event
 		require.NoError(t, json.Unmarshal(scanner.Bytes(), &event))
 		require.False(t, received[event.TS])
 		require.Equal(t, []string{strconv.FormatInt(event.TS, 10)}, event.Metrics)
@@ -80,9 +80,9 @@ func TestFile_Notify_ReturnsCancellationAndClosedFileErrors(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, receiver.Close()) })
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	require.ErrorIs(t, receiver.Notify(ctx, auditapp.Event{}), context.Canceled)
+	require.ErrorIs(t, receiver.Notify(ctx, auditobserver.Event{}), context.Canceled)
 	require.NoError(t, receiver.Close())
-	require.ErrorIs(t, receiver.Notify(context.Background(), auditapp.Event{}), os.ErrClosed)
+	require.ErrorIs(t, receiver.Notify(context.Background(), auditobserver.Event{}), os.ErrClosed)
 }
 
 func TestNewFile_ReturnsOpenError(t *testing.T) {

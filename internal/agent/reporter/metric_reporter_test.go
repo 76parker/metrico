@@ -35,13 +35,14 @@ func TestMetricReporter_RunLimitsConcurrentRequests(t *testing.T) {
 	}))
 	defer server.Close()
 
-	reporter := NewMetricReporter(
+	reporter, err := NewMetricReporter(
 		server.URL,
 		WithHTTPClient(server.Client()),
 		WithMetricProvider(staticProvider{}),
 		WithReportInterval(time.Millisecond),
 		WithRateLimit(2),
 	)
+	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		time.Sleep(30 * time.Millisecond)
@@ -107,12 +108,13 @@ func TestSendMetrics_Valid(t *testing.T) {
 	}))
 	defer testServer.Close()
 
-	reporter := NewMetricReporter(
+	reporter, err := NewMetricReporter(
 		testServer.URL,
 		WithHTTPClient(testServer.Client()),
 		WithReportInterval(time.Second),
 	)
-	err := reporter.sendMetrics(runtime.MemStats{
+	require.NoError(t, err)
+	err = reporter.sendMetrics(runtime.MemStats{
 		Alloc:         42,
 		GCCPUFraction: 0.5,
 	}, 7)
@@ -137,14 +139,15 @@ func TestSendMetrics_WithKey(t *testing.T) {
 			}, nil
 		}),
 	}
-	reporter := NewMetricReporter(
+	reporter, err := NewMetricReporter(
 		"http://metrics.test",
 		WithHTTPClient(client),
 		WithReportInterval(time.Second),
 		WithKey(key),
 	)
+	require.NoError(t, err)
 
-	err := reporter.sendMetrics(runtime.MemStats{}, 0)
+	err = reporter.sendMetrics(runtime.MemStats{}, 0)
 
 	require.NoError(t, err)
 }
@@ -157,12 +160,13 @@ func TestSendMetrics_Invalid(t *testing.T) {
 	}))
 	defer testServer.Close()
 
-	reporter := NewMetricReporter(
+	reporter, err := NewMetricReporter(
 		testServer.URL,
 		WithHTTPClient(testServer.Client()),
 		WithReportInterval(time.Second),
 	)
-	err := reporter.sendMetrics(runtime.MemStats{}, 0)
+	require.NoError(t, err)
+	err = reporter.sendMetrics(runtime.MemStats{}, 0)
 	assert.Error(t, err)
 	assert.Equal(t, 1, requestCount)
 }
@@ -174,13 +178,20 @@ func TestSendMetrics_InvalidResponseContentType(t *testing.T) {
 	}))
 	defer testServer.Close()
 
-	reporter := NewMetricReporter(
+	reporter, err := NewMetricReporter(
 		testServer.URL,
 		WithHTTPClient(testServer.Client()),
 		WithReportInterval(time.Second),
 	)
+	require.NoError(t, err)
 
 	assert.Error(t, reporter.sendMetrics(runtime.MemStats{}, 0))
+}
+
+func TestNewMetricReporter_ReturnsAddressParseError(t *testing.T) {
+	reporter, err := NewMetricReporter("http://%zz")
+	require.ErrorContains(t, err, "parse metric server address")
+	require.Nil(t, reporter)
 }
 
 func float64Pointer(value float64) *float64 {

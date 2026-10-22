@@ -1,6 +1,16 @@
 clean:
 	rm -f coverage.out
 
+.PHONY: staticlint check-coverage
+
+staticlint:
+	go run ./cmd/staticlint ./...
+
+check-coverage:
+	go test -race -coverprofile=coverage.out ./...
+	@go tool cover -func=coverage.out > coverage-summary.out
+	@awk '/^total:/ { found = 1; coverage = $$3 + 0; print "Total coverage: " $$3; if (coverage < 55) { print "Coverage must be at least 55%"; exit 1 } } END { if (!found) exit 1 }' coverage-summary.out
+
 SUPRESS_OUTPUT = > /dev/null
 
 METRICS_SCHEMA = internal/adapters/filestorage/snapshotschema/metrics-snapshot-v1.schema.json

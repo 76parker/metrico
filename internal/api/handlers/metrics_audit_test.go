@@ -16,15 +16,15 @@ import (
 
 	"github.com/76Parker/metrico/internal/api/handlers"
 	"github.com/76Parker/metrico/internal/api/middleware"
-	"github.com/76Parker/metrico/internal/applications/audit"
+	"github.com/76Parker/metrico/internal/applications/auditobserver"
 	metricsapp "github.com/76Parker/metrico/internal/applications/metrics"
 	domainmetrics "github.com/76Parker/metrico/internal/domain/metrics"
 	"github.com/76Parker/metrico/pkg/logger"
 )
 
-type auditPublisherFunc func(context.Context, audit.Event)
+type auditPublisherFunc func(context.Context, auditobserver.Event)
 
-func (publish auditPublisherFunc) Notify(ctx context.Context, event audit.Event) {
+func (publish auditPublisherFunc) Notify(ctx context.Context, event auditobserver.Event) {
 	publish(ctx, event)
 }
 
@@ -112,8 +112,8 @@ func TestMetricsHandler_Audit_ReportsAcceptedMetrics(t *testing.T) {
 			testCase.configure(service)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			var events []audit.Event
-			publisher := auditPublisherFunc(func(notifyCtx context.Context, event audit.Event) {
+			var events []auditobserver.Event
+			publisher := auditPublisherFunc(func(notifyCtx context.Context, event auditobserver.Event) {
 				require.Equal(t, ctx, notifyCtx)
 				events = append(events, event)
 			})
@@ -212,8 +212,8 @@ func TestMetricsHandler_Audit_SkipsUnsuccessfulAndEmptyRequests(t *testing.T) {
 			if testCase.configure != nil {
 				testCase.configure(service)
 			}
-			var events []audit.Event
-			publisher := auditPublisherFunc(func(_ context.Context, event audit.Event) {
+			var events []auditobserver.Event
+			publisher := auditPublisherFunc(func(_ context.Context, event auditobserver.Event) {
 				events = append(events, event)
 			})
 			handler := handlers.NewMetricsHandler(service, handlers.WithAuditPublisher(publisher))
@@ -224,20 +224,20 @@ func TestMetricsHandler_Audit_SkipsUnsuccessfulAndEmptyRequests(t *testing.T) {
 	}
 }
 
-type auditObserverFunc func(context.Context, audit.Event) error
+type auditObserverFunc func(context.Context, auditobserver.Event) error
 
-func (notify auditObserverFunc) Notify(ctx context.Context, event audit.Event) error {
+func (notify auditObserverFunc) Notify(ctx context.Context, event auditobserver.Event) error {
 	return notify(ctx, event)
 }
 
 func TestMetricsHandler_Audit_DeliveryFailurePreservesSuccessfulResponse(t *testing.T) {
 	service := newMockMetricsApplication(t)
 	service.EXPECT().Update(gomock.Any(), gomock.Any()).Return(nil)
-	var events []audit.Event
-	publisher, err := audit.NewPublisher(
+	var events []auditobserver.Event
+	publisher, err := auditobserver.NewPublisher(
 		logger.NewMockLogger(),
-		auditObserverFunc(func(context.Context, audit.Event) error { return errors.New("receiver unavailable") }),
-		auditObserverFunc(func(_ context.Context, event audit.Event) error {
+		auditObserverFunc(func(context.Context, auditobserver.Event) error { return errors.New("receiver unavailable") }),
+		auditObserverFunc(func(_ context.Context, event auditobserver.Event) error {
 			events = append(events, event)
 			return nil
 		}),

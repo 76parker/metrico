@@ -15,6 +15,7 @@ import (
 	"github.com/caarlos0/env/v11"
 
 	"github.com/76Parker/metrico/internal/app"
+	"github.com/76Parker/metrico/internal/buildinfo"
 	"github.com/76Parker/metrico/internal/config"
 	"github.com/76Parker/metrico/pkg/logger"
 )
@@ -30,6 +31,10 @@ const (
 
 // Application configuration flags
 var (
+	buildVersion = buildinfo.Unknown
+	buildDate    = buildinfo.Unknown
+	buildCommit  = buildinfo.Unknown
+
 	hostPort        string // -a (or ADDRESS env var)
 	fileStoragePath string // -f (or FILE_STORAGE_PATH env var)
 	storeInterval   int    // -i (or STORE_INTERVAL env var)
@@ -72,6 +77,8 @@ func (c *envConfig) applyOverrides() {
 }
 
 func main() {
+	fmt.Print(buildinfo.Format(buildVersion, buildDate, buildCommit))
+
 	ctx, stop := signal.NotifyContext(
 		context.Background(),
 		syscall.SIGTERM,

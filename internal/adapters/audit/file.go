@@ -8,7 +8,7 @@ import (
 	"os"
 	"sync"
 
-	auditapp "github.com/76Parker/metrico/internal/applications/audit"
+	auditobserver "github.com/76Parker/metrico/internal/applications/auditobserver"
 )
 
 // File appends complete JSON lines to one audit file.
@@ -27,7 +27,7 @@ func NewFile(path string) (*File, error) {
 }
 
 // Notify appends an event, serializing writes from concurrent requests.
-func (f *File) Notify(ctx context.Context, event auditapp.Event) error {
+func (f *File) Notify(ctx context.Context, event auditobserver.Event) error {
 	data, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("marshal file audit event: %w", err)

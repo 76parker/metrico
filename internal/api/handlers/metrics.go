@@ -15,7 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	goccyjson "github.com/goccy/go-json"
 
-	"github.com/76Parker/metrico/internal/applications/audit"
+	"github.com/76Parker/metrico/internal/applications/auditobserver"
 	metricsapp "github.com/76Parker/metrico/internal/applications/metrics"
 	"github.com/76Parker/metrico/internal/domain/metrics"
 )
@@ -39,7 +39,7 @@ type MetricsHandler struct {
 }
 
 type auditPublisher interface {
-	Notify(ctx context.Context, event audit.Event)
+	Notify(ctx context.Context, event auditobserver.Event)
 }
 
 // MetricsHandlerOption configures optional metrics handler behavior.
@@ -186,7 +186,7 @@ func (h *MetricsHandler) notifyAudit(c *gin.Context, metricNames []string) {
 	if err != nil {
 		ipAddress = c.Request.RemoteAddr
 	}
-	h.auditPublisher.Notify(c.Request.Context(), audit.Event{
+	h.auditPublisher.Notify(c.Request.Context(), auditobserver.Event{
 		TS:        time.Now().Unix(),
 		Metrics:   metricNames,
 		IPAddress: ipAddress,

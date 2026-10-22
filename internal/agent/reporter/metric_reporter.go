@@ -94,15 +94,15 @@ func WithSystemMetricProvider(provider systemMetricProvider) Option {
 }
 
 // NewMetricReporter разбирает адрес сервера и применяет опции отправки.
-// При ошибке разбора URL возвращает nil. Для Run задайте HTTP-клиент, источник
+// При ошибке разбора адреса возвращает ошибку. Для Run задайте HTTP-клиент, источник
 // runtime-метрик и положительный интервал соответствующими опциями.
 func NewMetricReporter(
 	serverAddr string,
 	options ...Option,
-) *MetricReporter {
+) (*MetricReporter, error) {
 	baseURL, err := url.Parse(serverAddr)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("parse metric server address: %w", err)
 	}
 	reporter := &MetricReporter{
 		url:       baseURL,
@@ -114,7 +114,7 @@ func NewMetricReporter(
 	if reporter.rateLimit <= 0 {
 		reporter.rateLimit = 1
 	}
-	return reporter
+	return reporter, nil
 }
 
 // Run отправляет метрики до отмены ctx и ожидает завершения отправителей.
