@@ -5,6 +5,12 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"path/filepath"
+
+	"github.com/76Parker/metrico/internal/adapters/filestorage"
+	"github.com/76Parker/metrico/internal/adapters/memstorage"
+	metricsapp "github.com/76Parker/metrico/internal/applications/metrics"
+	"github.com/76Parker/metrico/internal/domain/metrics"
 	"testing"
 	"time"
 
@@ -123,4 +129,49 @@ func waitForHTTP(t *testing.T, address string) {
 		case <-ticker.C:
 		}
 	}
+}
+
+func TestApplication_FinalSnapshotWaitsForHandler(t *testing.T) {
+	address := unusedAddress(t)
+	store, err := filestorage.NewStorage(filepath.Join(t.TempDir(), "metrics.json"))
+	require.NoError(t, err)
+	memory := memstorage.NewMemStorage()
+	snapshot := metricsapp.NewSnapshotCoordinator(store, memory, time.Hour)
+	started, release := make(chan struct{}), make(chan struct{})
+	app := &application{server: &http.Server{Addr: address, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-release
+		value := 42.0
+		_ = memory.Load(context.Background(), []metrics.Metrics{{ID: "last", Type: metrics.MetricTypeGauge, Value: &value}})
+	})}, snapshotter: snapshot, backgroundWorkers: []runner{snapshot}, shutdownTimeout: 5 * time.Second, log: logger.NewMockLogger()}
+	ctx, cancel := context.WithCancel(context.Background())
+	finished := make(chan error, 1)
+	go func() { finished <- app.run(ctx) }()
+	// Probe the listener without invoking the blocking handler.
+	require.Eventually(t, func() bool {
+		c, err := net.DialTimeout("tcp", address, 100*time.Millisecond)
+		if err != nil {
+			return false
+		}
+		_ = c.Close()
+		return true
+	}, 5*time.Second, time.Millisecond)
+	requestDone := make(chan struct{})
+	go func() {
+		defer close(requestDone)
+		response, err := http.Get("http://" + address)
+		if err == nil {
+			_ = response.Body.Close()
+		}
+	}()
+	<-started
+	cancel()
+	close(release)
+	require.NoError(t, <-finished)
+	<-requestDone
+	saved, err := store.Restore(context.Background())
+	require.NoError(t, err)
+	require.Len(t, saved, 1)
+	require.Equal(t, "last", saved[0].ID)
+	require.Equal(t, 42.0, *saved[0].Value)
 }

@@ -35,7 +35,7 @@ func NewStorage(fileStoragePath string) (*Storage, error) {
 		return nil, fmt.Errorf("parse embedded snapshot schema: %w", err)
 	}
 
-	const schemaURL = "metrics-snapshot-v1.schema.json"
+	const schemaURL = "https://metrico.invalid/metrics-snapshot-v1.schema.json"
 	if err := compiler.AddResource(schemaURL, schemaDocument); err != nil {
 		return nil, fmt.Errorf("register embedded snapshot schema: %w", err)
 	}

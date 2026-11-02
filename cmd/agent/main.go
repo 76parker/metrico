@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/rsa"
-	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -80,7 +79,7 @@ func resolveRateLimit(flagValue int, flagSet bool, envValue int, envSet bool) (i
 
 func main() {
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
 	var pollSeconds, reportSeconds int
 	var configPath string
@@ -151,7 +150,7 @@ func main() {
 		reporter.WithRateLimit(rateLimit),
 		reporter.WithSystemMetricProvider(systemProvider),
 	)
-	if err := reporter.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+	if err := reporter.Run(ctx); err != nil && err != context.Canceled {
 		log.Fatal(err)
 	}
 }

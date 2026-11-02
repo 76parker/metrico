@@ -5,8 +5,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/rsa"
+	"errors"
 	"fmt"
-	"log"
 	"math/rand/v2"
 	"mime"
 	"net/http"
@@ -132,36 +132,47 @@ func (r *MetricReporter) Run(ctx context.Context) error {
 	defer reportTicker.Stop()
 	jobs := make(chan []metrics.Metrics, r.rateLimit)
 	var workers sync.WaitGroup
+	var errMu sync.Mutex
+	var sendErr error
 	for i := 0; i < r.rateLimit; i++ {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
 			for batch := range jobs {
 				if err := r.sendBatch(batch); err != nil {
-					log.Print(err)
+					errMu.Lock()
+					sendErr = errors.Join(sendErr, err)
+					errMu.Unlock()
 				}
 			}
 		}()
 	}
-	defer func() {
-		close(jobs)
-		workers.Wait()
-	}()
-
+	batch := func() []metrics.Metrics {
+		runtimeMetrics, pollCount := r.provider.Metrics()
+		result := r.metricsBatch(runtimeMetrics, pollCount)
+		if r.systemProvider != nil {
+			result = append(result, r.systemProvider.Metrics()...)
+		}
+		return result
+	}
 	for {
 		select {
 		case <-reportTicker.C:
-			runtimeMetrics, pollCount := r.provider.Metrics()
-			batch := r.metricsBatch(runtimeMetrics, pollCount)
-			if r.systemProvider != nil {
-				batch = append(batch, r.systemProvider.Metrics()...)
-			}
-			select {
-			case jobs <- batch:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
+			// После чтения PollCount пакет обязательно должен попасть в очередь.
+			jobs <- batch()
 		case <-ctx.Done():
+			if p, ok := r.provider.(interface{ Wait() }); ok {
+				p.Wait()
+			}
+			if p, ok := r.systemProvider.(interface{ Wait() }); ok {
+				p.Wait()
+			}
+			jobs <- batch()
+			close(jobs)
+			workers.Wait()
+			if sendErr != nil {
+				return errors.Join(ctx.Err(), sendErr)
+			}
 			return ctx.Err()
 		}
 	}

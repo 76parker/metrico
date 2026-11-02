@@ -243,3 +243,36 @@ func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error)
 // 		}
 // 	}
 // }
+
+func TestRunFlushesAfterCancellation(t *testing.T) {
+	var calls atomic.Int32
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls.Add(1)
+		var batch []metrics.Metrics
+		require.NoError(t, goccyjson.NewDecoder(request.Body).Decode(&batch))
+		var count int64
+		for _, metric := range batch {
+			if metric.ID == "PollCount" {
+				count = *metric.Delta
+			}
+		}
+		require.Equal(t, int64(1), count)
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(""))}, nil
+	})}
+	r := NewMetricReporter("http://example.test", WithHTTPClient(client), WithMetricProvider(staticProvider{}), WithReportInterval(time.Hour))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.ErrorIs(t, r.Run(ctx), context.Canceled)
+	require.Equal(t, int32(1), calls.Load())
+}
+
+func TestRunReportsFlushFailure(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusBadRequest, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(""))}, nil
+	})}
+	r := NewMetricReporter("http://example.test", WithHTTPClient(client), WithMetricProvider(staticProvider{}), WithReportInterval(time.Hour))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := r.Run(ctx)
+	require.ErrorContains(t, err, "unexpected status code: 400")
+}
