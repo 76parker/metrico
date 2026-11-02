@@ -17,6 +17,7 @@ import (
 // Содержит мьютекс и не должен копироваться после использования.
 type SystemMetricProvider struct {
 	mu       sync.RWMutex
+	wg       sync.WaitGroup
 	metrics  []metrics.Metrics
 	interval time.Duration
 }
@@ -40,7 +41,9 @@ func NewSystemMetricProviderWithContext(ctx context.Context, interval time.Durat
 // Конструктор уже запускает цикл; повторный вызов создаёт дополнительный цикл.
 func (p *SystemMetricProvider) Start(ctx context.Context) {
 	ticker := time.NewTicker(p.interval)
+	p.wg.Add(1)
 	go func() {
+		defer p.wg.Done()
 		defer ticker.Stop()
 		for {
 			select {
@@ -99,3 +102,6 @@ func collectSystemMetrics() ([]metrics.Metrics, error) {
 func newSystemGauge(name string, value float64) metrics.Metrics {
 	return metrics.Metrics{ID: name, Type: metrics.MetricTypeGauge, Value: &value}
 }
+
+// Wait ожидает завершения сбора после отмены контекста.
+func (p *SystemMetricProvider) Wait() { p.wg.Wait() }

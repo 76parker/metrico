@@ -13,6 +13,7 @@ import (
 type MetricProvider struct {
 	metrics           runtime.MemStats
 	mu                sync.Mutex
+	wg                sync.WaitGroup
 	pollCount         int64
 	previousPollCount int64
 	pollInterval      time.Duration
@@ -40,7 +41,9 @@ func NewMetricProviderWithContext(ctx context.Context, pollInterval time.Duratio
 // Конструктор уже запускает цикл; повторный вызов создаёт дополнительный цикл.
 func (mp *MetricProvider) Start(ctx context.Context) {
 	timer := time.NewTicker(mp.pollInterval)
+	mp.wg.Add(1)
 	go func() {
+		defer mp.wg.Done()
 		defer timer.Stop()
 		for {
 			select {
@@ -68,3 +71,6 @@ func (mp *MetricProvider) Metrics() (runtime.MemStats, int64) {
 	mp.previousPollCount = mp.pollCount
 	return mp.metrics, pollCount
 }
+
+// Wait ожидает завершения сбора после отмены контекста.
+func (mp *MetricProvider) Wait() { mp.wg.Wait() }

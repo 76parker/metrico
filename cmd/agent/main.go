@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"errors"
+	"crypto/rsa"
 	"flag"
 	"fmt"
 	"log"
@@ -15,6 +15,8 @@ import (
 
 	"github.com/76Parker/metrico/internal/agent/provider"
 	"github.com/76Parker/metrico/internal/agent/reporter"
+	"github.com/76Parker/metrico/internal/cryptomsg"
+	"github.com/76Parker/metrico/internal/jsonconfig"
 	"github.com/caarlos0/env/v11"
 )
 
@@ -31,9 +33,11 @@ var (
 	rateLimit      int
 	addr           string
 	key            string
+	cryptoKeyPath  string
 )
 
 type envConfig struct {
+	CryptoKey      string `env:"CRYPTO_KEY"`
 	ServerAddress  string `env:"ADDRESS"`
 	Key            string `env:"KEY"`
 	PollInterval   int    `env:"POLL_INTERVAL"`
@@ -44,6 +48,9 @@ type envConfig struct {
 func (e *envConfig) redefineConfigFromEnv() {
 	if _, ok := os.LookupEnv("ADDRESS"); ok {
 		addr = e.ServerAddress
+	}
+	if _, ok := os.LookupEnv("CRYPTO_KEY"); ok {
+		cryptoKeyPath = e.CryptoKey
 	}
 	if _, ok := os.LookupEnv("KEY"); ok {
 		key = e.Key
@@ -72,11 +79,14 @@ func resolveRateLimit(flagValue int, flagSet bool, envValue int, envSet bool) (i
 
 func main() {
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
 	var pollSeconds, reportSeconds int
+	var configPath string
+	jsonconfig.RegisterPath(flag.CommandLine, &configPath)
 	flag.StringVar(&addr, "a", defaultAddr, "Listener address")
 	flag.StringVar(&key, "k", "", "Hash key")
+	flag.StringVar(&cryptoKeyPath, "crypto-key", "", "RSA public key file")
 	flag.IntVar(&pollSeconds, "p", int(defaultPollInterval/time.Second), "Poll interval for metric provider in seconds")
 	flag.IntVar(&reportSeconds, "r", int(defaultReportInterval/time.Second), "Report interval for metric reporter in seconds")
 	flag.IntVar(&rateLimit, "l", defaultRateLimit, "Maximum concurrent outgoing requests")
@@ -84,22 +94,42 @@ func main() {
 
 	pollInterval = time.Duration(pollSeconds) * time.Second
 	reportInterval = time.Duration(reportSeconds) * time.Second
+	visited := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) { visited[f.Name] = true })
+	configPath, pathErr := jsonconfig.ResolvePath(flag.CommandLine, configPath)
+	if pathErr != nil {
+		log.Fatal(pathErr)
+	}
+	if configPath != "" {
+		var fileCfg jsonconfig.Agent
+		if err := jsonconfig.Load(configPath, &fileCfg); err != nil {
+			log.Fatal(err)
+		}
+		applyJSONConfig(fileCfg, visited)
+	}
 
 	envCfg, err := applyEnvOverrides()
 	if err != nil {
 		log.Fatalf("parse config from env error: %v", err)
 	}
 	envCfg.redefineConfigFromEnv()
-	flagRateLimitSet := false
-	flag.Visit(func(f *flag.Flag) {
-		if f.Name == "l" {
-			flagRateLimitSet = true
-		}
-	})
+	flagRateLimitSet := visited["l"]
 	_, rateLimitEnvSet := os.LookupEnv("RATE_LIMIT")
-	rateLimit, err = resolveRateLimit(rateLimit, flagRateLimitSet, envCfg.RateLimit, rateLimitEnvSet)
+	if flagRateLimitSet || rateLimitEnvSet {
+		rateLimit, err = resolveRateLimit(rateLimit, flagRateLimitSet, envCfg.RateLimit, rateLimitEnvSet)
+	} else if rateLimit <= 0 {
+		err = fmt.Errorf("rate limit must be positive")
+	}
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	var publicKey *rsa.PublicKey
+	if cryptoKeyPath != "" {
+		publicKey, err = cryptomsg.LoadPublic(cryptoKeyPath)
+		if err != nil {
+			log.Fatalf("load public key: %v", err)
+		}
 	}
 
 	httpClient := &http.Client{
@@ -116,14 +146,36 @@ func main() {
 		reporter.WithMetricProvider(runtimeProvider),
 		reporter.WithReportInterval(reportInterval),
 		reporter.WithKey(key),
+		reporter.WithCryptoKey(publicKey),
 		reporter.WithRateLimit(rateLimit),
 		reporter.WithSystemMetricProvider(systemProvider),
 	)
-	if err := reporter.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+	if err := reporter.Run(ctx); err != nil && err != context.Canceled {
 		log.Fatal(err)
 	}
 }
 
 func applyEnvOverrides() (envConfig, error) {
 	return env.ParseAs[envConfig]()
+}
+
+func applyJSONConfig(c jsonconfig.Agent, flags map[string]bool) {
+	if c.Address != nil && !flags["a"] {
+		addr = *c.Address
+	}
+	if c.Key != nil && !flags["k"] {
+		key = *c.Key
+	}
+	if c.CryptoKey != nil && !flags["crypto-key"] {
+		cryptoKeyPath = *c.CryptoKey
+	}
+	if c.PollInterval != nil && !flags["p"] {
+		pollInterval = time.Duration(*c.PollInterval)
+	}
+	if c.ReportInterval != nil && !flags["r"] {
+		reportInterval = time.Duration(*c.ReportInterval)
+	}
+	if c.RateLimit != nil && !flags["l"] {
+		rateLimit = *c.RateLimit
+	}
 }

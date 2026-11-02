@@ -4,8 +4,9 @@ package reporter
 import (
 	"bytes"
 	"context"
+	"crypto/rsa"
+	"errors"
 	"fmt"
-	"log"
 	"math/rand/v2"
 	"mime"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/76Parker/metrico/internal/cryptomsg"
 	"github.com/76Parker/metrico/internal/domain/metrics"
 	"github.com/76Parker/metrico/internal/signature"
 	goccyjson "github.com/goccy/go-json"
@@ -40,6 +42,7 @@ type systemMetricProvider interface {
 // MetricReporter периодически отправляет runtime- и системные метрики пакетами по HTTP.
 type MetricReporter struct {
 	client         *http.Client
+	cryptoKey      *rsa.PublicKey
 	key            string
 	reportInterval time.Duration
 	url            *url.URL
@@ -77,6 +80,10 @@ func WithKey(key string) Option {
 	return func(reporter *MetricReporter) {
 		reporter.key = key
 	}
+}
+
+func WithCryptoKey(key *rsa.PublicKey) Option {
+	return func(reporter *MetricReporter) { reporter.cryptoKey = key }
 }
 
 // WithRateLimit устанавливает число параллельных отправителей.
@@ -125,36 +132,47 @@ func (r *MetricReporter) Run(ctx context.Context) error {
 	defer reportTicker.Stop()
 	jobs := make(chan []metrics.Metrics, r.rateLimit)
 	var workers sync.WaitGroup
+	var errMu sync.Mutex
+	var sendErr error
 	for i := 0; i < r.rateLimit; i++ {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
 			for batch := range jobs {
 				if err := r.sendBatch(batch); err != nil {
-					log.Print(err)
+					errMu.Lock()
+					sendErr = errors.Join(sendErr, err)
+					errMu.Unlock()
 				}
 			}
 		}()
 	}
-	defer func() {
-		close(jobs)
-		workers.Wait()
-	}()
-
+	batch := func() []metrics.Metrics {
+		runtimeMetrics, pollCount := r.provider.Metrics()
+		result := r.metricsBatch(runtimeMetrics, pollCount)
+		if r.systemProvider != nil {
+			result = append(result, r.systemProvider.Metrics()...)
+		}
+		return result
+	}
 	for {
 		select {
 		case <-reportTicker.C:
-			runtimeMetrics, pollCount := r.provider.Metrics()
-			batch := r.metricsBatch(runtimeMetrics, pollCount)
-			if r.systemProvider != nil {
-				batch = append(batch, r.systemProvider.Metrics()...)
-			}
-			select {
-			case jobs <- batch:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
+			// После чтения PollCount пакет обязательно должен попасть в очередь.
+			jobs <- batch()
 		case <-ctx.Done():
+			if p, ok := r.provider.(interface{ Wait() }); ok {
+				p.Wait()
+			}
+			if p, ok := r.systemProvider.(interface{ Wait() }); ok {
+				p.Wait()
+			}
+			jobs <- batch()
+			close(jobs)
+			workers.Wait()
+			if sendErr != nil {
+				return errors.Join(ctx.Err(), sendErr)
+			}
 			return ctx.Err()
 		}
 	}
@@ -216,6 +234,13 @@ func (r *MetricReporter) sendBatch(metricsBatch []metrics.Metrics) error {
 		return fmt.Errorf("marshal metric batch: %w", err)
 	}
 
+	if r.cryptoKey != nil {
+		body, err = cryptomsg.Encrypt(r.cryptoKey, body)
+		if err != nil {
+			return fmt.Errorf("encrypt metric batch: %w", err)
+		}
+	}
+
 	var response *http.Response
 	defer func() {
 		if response != nil {
@@ -228,6 +253,9 @@ func (r *MetricReporter) sendBatch(metricsBatch []metrics.Metrics) error {
 			return fmt.Errorf("create batch update request: %w", err)
 		}
 		request.Header.Set("Content-Type", "application/json")
+		if r.cryptoKey != nil {
+			request.Header.Set(cryptomsg.Header, cryptomsg.Version)
+		}
 		if r.key != "" {
 			request.Header.Set(signature.HeaderName, signature.Sum(body, r.key))
 		}

@@ -2,8 +2,10 @@ package main
 
 import (
 	"flag"
+	"github.com/76Parker/metrico/internal/jsonconfig"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/caarlos0/env/v11"
 	"github.com/stretchr/testify/require"
@@ -114,3 +116,25 @@ func TestAuditConfiguration_FlagsAndEnvironment(t *testing.T) {
 		})
 	}
 }
+
+func TestJSONConfigAndOverrides(t *testing.T) {
+	oldAddr, oldPath, oldStore, oldRestore, oldDSN, oldCrypto, oldKey := hostPort, fileStoragePath, storeInterval, restore, databaseDSN, cryptoKeyPath, key
+	t.Cleanup(func() {
+		hostPort, fileStoragePath, storeInterval, restore, databaseDSN, cryptoKeyPath, key = oldAddr, oldPath, oldStore, oldRestore, oldDSN, oldCrypto, oldKey
+	})
+	hostPort, fileStoragePath, restore = "flag-address", "old", true
+	cfg := config.Config{HTTPConfig: config.HTTP{ReadTimeout: time.Second}}
+	interval := time.Second
+	file := jsonconfig.Server{Address: ptr("file-address"), Restore: ptr(false), StoreFile: ptr("file.db"), StoreInterval: ptr(jsonconfig.Duration(500 * time.Millisecond)), DatabaseDSN: ptr("dsn"), CryptoKey: ptr("private.pem"), Key: ptr("key"), AuditFile: ptr("audit"), AuditURL: ptr("url"), PprofAddress: ptr("127.0.0.1:6060"), ReadTimeout: ptr(jsonconfig.Duration(2 * time.Second)), WriteTimeout: ptr(jsonconfig.Duration(3 * time.Second)), ReadHeaderTimeout: ptr(jsonconfig.Duration(4 * time.Second)), IdleTimeout: ptr(jsonconfig.Duration(5 * time.Second)), MaxHeaderBytes: ptr(10)}
+	applyJSONConfig(file, map[string]bool{"a": true, "audit-url": true}, &cfg, &interval)
+	if hostPort != "flag-address" || restore || fileStoragePath != "file.db" || interval != 500*time.Millisecond || databaseDSN != "dsn" || cryptoKeyPath != "private.pem" || key != "key" || cfg.Audit.File != "audit" || cfg.Audit.URL != "" || cfg.PPROFAddress != "127.0.0.1:6060" || cfg.HTTPConfig.ReadTimeout != 2*time.Second || cfg.HTTPConfig.WriteTimeout != 3*time.Second || cfg.HTTPConfig.ReadHeaderTimeout != 4*time.Second || cfg.HTTPConfig.IdleTimeout != 5*time.Second || cfg.HTTPConfig.MaxHeaderBytes != 10 {
+		t.Fatalf("unexpected JSON settings: %+v", cfg)
+	}
+	t.Setenv("FILE_STORAGE_PATH", "legacy")
+	t.Setenv("STORE_FILE", "new")
+	(&envConfig{FileStoragePath: "legacy", StoreFile: "new"}).applyOverrides()
+	if fileStoragePath != "new" {
+		t.Fatalf("store path = %q", fileStoragePath)
+	}
+}
+func ptr[T any](v T) *T { return &v }
