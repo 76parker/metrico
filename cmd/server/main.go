@@ -16,6 +16,7 @@ import (
 
 	"github.com/76Parker/metrico/internal/app"
 	"github.com/76Parker/metrico/internal/config"
+	"github.com/76Parker/metrico/internal/cryptomsg"
 	"github.com/76Parker/metrico/pkg/logger"
 )
 
@@ -35,10 +36,12 @@ var (
 	storeInterval   int    // -i (or STORE_INTERVAL env var)
 	restore         bool   // -r (or RESTORE env var)
 	databaseDSN     string // -d (or DATABASE_DSN env var)
+	cryptoKeyPath   string
 	key             string // -k (or KEY env var)
 )
 
 type envConfig struct {
+	CryptoKey       string `env:"CRYPTO_KEY"`
 	PPROFAddress    string `env:"PPROF_ADDRESS"`
 	Addr            string `env:"ADDRESS"`
 	Key             string `env:"KEY"`
@@ -53,6 +56,9 @@ type envConfig struct {
 func (c *envConfig) applyOverrides() {
 	if _, ok := os.LookupEnv("ADDRESS"); ok {
 		hostPort = c.Addr
+	}
+	if _, ok := os.LookupEnv("CRYPTO_KEY"); ok {
+		cryptoKeyPath = c.CryptoKey
 	}
 	if _, ok := os.LookupEnv("KEY"); ok {
 		key = c.Key
@@ -90,7 +96,8 @@ func main() {
 		log.Fatal("error config load:", err)
 	}
 	// Flag parsing
-	flag.StringVar(&hostPort, "a", defaultAddr, "HTTP listener address")               // -a
+	flag.StringVar(&hostPort, "a", defaultAddr, "HTTP listener address") // -a
+	flag.StringVar(&cryptoKeyPath, "crypto-key", "", "RSA private key file")
 	flag.StringVar(&key, "k", "", "Hash key")                                          // -k
 	flag.StringVar(&fileStoragePath, "f", defaultFileStoragePath, "file storage path") // -f
 	flag.IntVar(&storeInterval, "i", defaultStoreInterval, "store interval")           // -i
@@ -114,6 +121,12 @@ func main() {
 
 	cfg.HTTPConfig.Address = hostPort
 	cfg.HTTPConfig.HashKey = key
+	if cryptoKeyPath != "" {
+		cfg.HTTPConfig.CryptoKey, err = cryptomsg.LoadPrivate(cryptoKeyPath)
+		if err != nil {
+			log.Fatalf("load private key: %v", err)
+		}
+	}
 	cfg.SnapshotServiceConfig = config.SnapshotService{
 		StoreInterval:   time.Duration(storeInterval) * time.Second,
 		FileStoragePath: fileStoragePath,

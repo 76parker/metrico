@@ -1,16 +1,20 @@
 package config
 
-import "time"
+import (
+	"crypto/rsa"
+	"time"
+)
 
 // HTTP задаёт адрес, ключ подписи и ограничения основного HTTP-сервера.
 type HTTP struct {
-	Address           string        `yaml:"address"`
-	HashKey           string        `yaml:"hash_key"`
-	ReadTimeout       time.Duration `yaml:"read_timeout"`
-	WriteTimeout      time.Duration `yaml:"write_timeout"`
-	ReadHeaderTimeout time.Duration `yaml:"read_header_timeout"`
-	MaxHeaderBytes    int           `yaml:"max_header_bytes"`
-	IdleTimeout       time.Duration `yaml:"idle_timeout"`
+	Address           string          `yaml:"address"`
+	CryptoKey         *rsa.PrivateKey `yaml:"-"`
+	HashKey           string          `yaml:"hash_key"`
+	ReadTimeout       time.Duration   `yaml:"read_timeout"`
+	WriteTimeout      time.Duration   `yaml:"write_timeout"`
+	ReadHeaderTimeout time.Duration   `yaml:"read_header_timeout"`
+	MaxHeaderBytes    int             `yaml:"max_header_bytes"`
+	IdleTimeout       time.Duration   `yaml:"idle_timeout"`
 }
 
 // Postgres задаёт строку подключения к PostgreSQL; пустой DSN выбирает хранилище в памяти.

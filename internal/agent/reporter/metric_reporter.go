@@ -4,6 +4,7 @@ package reporter
 import (
 	"bytes"
 	"context"
+	"crypto/rsa"
 	"fmt"
 	"log"
 	"math/rand/v2"
@@ -15,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/76Parker/metrico/internal/cryptomsg"
 	"github.com/76Parker/metrico/internal/domain/metrics"
 	"github.com/76Parker/metrico/internal/signature"
 	goccyjson "github.com/goccy/go-json"
@@ -40,6 +42,7 @@ type systemMetricProvider interface {
 // MetricReporter периодически отправляет runtime- и системные метрики пакетами по HTTP.
 type MetricReporter struct {
 	client         *http.Client
+	cryptoKey      *rsa.PublicKey
 	key            string
 	reportInterval time.Duration
 	url            *url.URL
@@ -77,6 +80,10 @@ func WithKey(key string) Option {
 	return func(reporter *MetricReporter) {
 		reporter.key = key
 	}
+}
+
+func WithCryptoKey(key *rsa.PublicKey) Option {
+	return func(reporter *MetricReporter) { reporter.cryptoKey = key }
 }
 
 // WithRateLimit устанавливает число параллельных отправителей.
@@ -216,6 +223,13 @@ func (r *MetricReporter) sendBatch(metricsBatch []metrics.Metrics) error {
 		return fmt.Errorf("marshal metric batch: %w", err)
 	}
 
+	if r.cryptoKey != nil {
+		body, err = cryptomsg.Encrypt(r.cryptoKey, body)
+		if err != nil {
+			return fmt.Errorf("encrypt metric batch: %w", err)
+		}
+	}
+
 	var response *http.Response
 	defer func() {
 		if response != nil {
@@ -228,6 +242,9 @@ func (r *MetricReporter) sendBatch(metricsBatch []metrics.Metrics) error {
 			return fmt.Errorf("create batch update request: %w", err)
 		}
 		request.Header.Set("Content-Type", "application/json")
+		if r.cryptoKey != nil {
+			request.Header.Set(cryptomsg.Header, cryptomsg.Version)
+		}
 		if r.key != "" {
 			request.Header.Set(signature.HeaderName, signature.Sum(body, r.key))
 		}

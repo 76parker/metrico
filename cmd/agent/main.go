@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rsa"
 	"errors"
 	"flag"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/76Parker/metrico/internal/agent/provider"
 	"github.com/76Parker/metrico/internal/agent/reporter"
+	"github.com/76Parker/metrico/internal/cryptomsg"
 	"github.com/caarlos0/env/v11"
 )
 
@@ -31,9 +33,11 @@ var (
 	rateLimit      int
 	addr           string
 	key            string
+	cryptoKeyPath  string
 )
 
 type envConfig struct {
+	CryptoKey      string `env:"CRYPTO_KEY"`
 	ServerAddress  string `env:"ADDRESS"`
 	Key            string `env:"KEY"`
 	PollInterval   int    `env:"POLL_INTERVAL"`
@@ -44,6 +48,9 @@ type envConfig struct {
 func (e *envConfig) redefineConfigFromEnv() {
 	if _, ok := os.LookupEnv("ADDRESS"); ok {
 		addr = e.ServerAddress
+	}
+	if _, ok := os.LookupEnv("CRYPTO_KEY"); ok {
+		cryptoKeyPath = e.CryptoKey
 	}
 	if _, ok := os.LookupEnv("KEY"); ok {
 		key = e.Key
@@ -77,6 +84,7 @@ func main() {
 	var pollSeconds, reportSeconds int
 	flag.StringVar(&addr, "a", defaultAddr, "Listener address")
 	flag.StringVar(&key, "k", "", "Hash key")
+	flag.StringVar(&cryptoKeyPath, "crypto-key", "", "RSA public key file")
 	flag.IntVar(&pollSeconds, "p", int(defaultPollInterval/time.Second), "Poll interval for metric provider in seconds")
 	flag.IntVar(&reportSeconds, "r", int(defaultReportInterval/time.Second), "Report interval for metric reporter in seconds")
 	flag.IntVar(&rateLimit, "l", defaultRateLimit, "Maximum concurrent outgoing requests")
@@ -102,6 +110,14 @@ func main() {
 		log.Fatal(err)
 	}
 
+	var publicKey *rsa.PublicKey
+	if cryptoKeyPath != "" {
+		publicKey, err = cryptomsg.LoadPublic(cryptoKeyPath)
+		if err != nil {
+			log.Fatalf("load public key: %v", err)
+		}
+	}
+
 	httpClient := &http.Client{
 		Timeout: 5 * time.Second,
 	}
@@ -116,6 +132,7 @@ func main() {
 		reporter.WithMetricProvider(runtimeProvider),
 		reporter.WithReportInterval(reportInterval),
 		reporter.WithKey(key),
+		reporter.WithCryptoKey(publicKey),
 		reporter.WithRateLimit(rateLimit),
 		reporter.WithSystemMetricProvider(systemProvider),
 	)
