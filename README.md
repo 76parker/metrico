@@ -84,3 +84,44 @@ Dropped 220 nodes (cum <= 32.77MB)
 Например, ключи можно создать командами `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out private.pem` и `openssl pkey -in private.pem -pubout -out public.pem`. Запустите сервер с `-crypto-key private.pem`, а агент с `-crypto-key public.pem`.
 
 Агент шифрует тело запроса AES-256-GCM со случайным ключом и nonce; ключ AES шифруется RSA-OAEP с SHA-256. Заголовок `X-Metrico-Encryption: 1` обозначает бинарный конверт: байт версии `1`, двухбайтовая длина RSA-шифротекста в big-endian, RSA-шифротекст, 12-байтовый nonce и шифротекст AES-GCM с тегом. Подпись `HashSHA256`, если настроена, вычисляется по конверту. Сервер также принимает обычные запросы; ответы не шифруются. Максимальный размер зашифрованного тела — 1 МиБ. Для защиты соединения и ответов используйте HTTPS.
+
+### JSON-конфигурация
+
+Агент и сервер принимают путь к необязательному JSON-файлу через `-c`, `-config` или `CONFIG`. Если задана `CONFIG`, она определяет путь вместо флага. Сервер по-прежнему загружает YAML из `CONFIG_PATH` (по умолчанию `config.yaml`); настройки JSON имеют приоритет над YAML. Явно заданные флаги и переменные окружения имеют приоритет над JSON. Переменные окружения обычно имеют приоритет над флагами; исключение — `-l` агента имеет приоритет над `RATE_LIMIT`.
+
+Пример файла агента:
+
+```json
+{
+  "address": "localhost:8080",
+  "report_interval": "1s",
+  "poll_interval": "500ms",
+  "crypto_key": "public.pem",
+  "key": "secret",
+  "rate_limit": 2
+}
+```
+
+Пример файла сервера:
+
+```json
+{
+  "address": "localhost:8080",
+  "restore": true,
+  "store_interval": "1s",
+  "store_file": "metrics.json",
+  "database_dsn": "",
+  "crypto_key": "private.pem",
+  "key": "secret",
+  "audit_file": "",
+  "audit_url": "",
+  "pprof_address": "",
+  "read_timeout": "1s",
+  "write_timeout": "2s",
+  "read_header_timeout": "1s",
+  "max_header_bytes": 1048576,
+  "idle_timeout": "10s"
+}
+```
+
+Все поля необязательны. Интервалы и таймауты JSON задаются строками длительности Go; флаги и переменные окружения интервалов по-прежнему задаются целым числом секунд. Для пути снимка поддерживаются `STORE_FILE` и прежняя `FILE_STORAGE_PATH`; если заданы обе переменные, используется `STORE_FILE`. Недоступный или некорректный указанный JSON-файл приводит к ошибке запуска.

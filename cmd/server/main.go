@@ -17,6 +17,7 @@ import (
 	"github.com/76Parker/metrico/internal/app"
 	"github.com/76Parker/metrico/internal/config"
 	"github.com/76Parker/metrico/internal/cryptomsg"
+	"github.com/76Parker/metrico/internal/jsonconfig"
 	"github.com/76Parker/metrico/pkg/logger"
 )
 
@@ -46,6 +47,7 @@ type envConfig struct {
 	Addr            string `env:"ADDRESS"`
 	Key             string `env:"KEY"`
 	FileStoragePath string `env:"FILE_STORAGE_PATH"`
+	StoreFile       string `env:"STORE_FILE"`
 	StoreInterval   int    `env:"STORE_INTERVAL"`
 	Restore         bool   `env:"RESTORE"`
 	DatabaseDSN     string `env:"DATABASE_DSN"`
@@ -65,6 +67,9 @@ func (c *envConfig) applyOverrides() {
 	}
 	if _, ok := os.LookupEnv("FILE_STORAGE_PATH"); ok {
 		fileStoragePath = c.FileStoragePath
+	}
+	if _, ok := os.LookupEnv("STORE_FILE"); ok {
+		fileStoragePath = c.StoreFile
 	}
 	if _, ok := os.LookupEnv("STORE_INTERVAL"); ok {
 		storeInterval = c.StoreInterval
@@ -96,6 +101,8 @@ func main() {
 		log.Fatal("error config load:", err)
 	}
 	// Flag parsing
+	var jsonPath string
+	jsonconfig.RegisterPath(flag.CommandLine, &jsonPath)
 	flag.StringVar(&hostPort, "a", defaultAddr, "HTTP listener address") // -a
 	flag.StringVar(&cryptoKeyPath, "crypto-key", "", "RSA private key file")
 	flag.StringVar(&key, "k", "", "Hash key")                                          // -k
@@ -107,11 +114,28 @@ func main() {
 	registerDiagnosticsFlags(flag.CommandLine, cfg)
 
 	flag.Parse()
+	visited := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) { visited[f.Name] = true })
+	jsonPath, pathErr := jsonconfig.ResolvePath(flag.CommandLine, jsonPath)
+	if pathErr != nil {
+		log.Fatal(pathErr)
+	}
+	snapshotInterval := time.Duration(storeInterval) * time.Second
+	if jsonPath != "" {
+		var fileCfg jsonconfig.Server
+		if err := jsonconfig.Load(jsonPath, &fileCfg); err != nil {
+			log.Fatal(err)
+		}
+		applyJSONConfig(fileCfg, visited, cfg, &snapshotInterval)
+	}
 	configFromEnv, err := env.ParseAs[envConfig]()
 	if err != nil {
 		log.Fatal("error parsing env:", err)
 	}
 	configFromEnv.applyOverrides()
+	if _, ok := os.LookupEnv("STORE_INTERVAL"); ok {
+		snapshotInterval = time.Duration(storeInterval) * time.Second
+	}
 	configFromEnv.applyAuditOverrides(&cfg.Audit)
 	configFromEnv.applyDiagnosticsOverrides(cfg)
 
@@ -128,7 +152,7 @@ func main() {
 		}
 	}
 	cfg.SnapshotServiceConfig = config.SnapshotService{
-		StoreInterval:   time.Duration(storeInterval) * time.Second,
+		StoreInterval:   snapshotInterval,
 		FileStoragePath: fileStoragePath,
 		Restore:         restore,
 	}
@@ -182,4 +206,52 @@ func validateHostPort(address string) error {
 		return fmt.Errorf("address cannot be empty")
 	}
 	return nil
+}
+
+func applyJSONConfig(c jsonconfig.Server, flags map[string]bool, cfg *config.Config, interval *time.Duration) {
+	if c.Address != nil && !flags["a"] {
+		hostPort = *c.Address
+	}
+	if c.Key != nil && !flags["k"] {
+		key = *c.Key
+	}
+	if c.CryptoKey != nil && !flags["crypto-key"] {
+		cryptoKeyPath = *c.CryptoKey
+	}
+	if c.Restore != nil && !flags["r"] {
+		restore = *c.Restore
+	}
+	if c.StoreFile != nil && !flags["f"] {
+		fileStoragePath = *c.StoreFile
+	}
+	if c.StoreInterval != nil && !flags["i"] {
+		*interval = time.Duration(*c.StoreInterval)
+	}
+	if c.DatabaseDSN != nil && !flags["d"] {
+		databaseDSN = *c.DatabaseDSN
+	}
+	if c.AuditFile != nil && !flags["audit-file"] {
+		cfg.Audit.File = *c.AuditFile
+	}
+	if c.AuditURL != nil && !flags["audit-url"] {
+		cfg.Audit.URL = *c.AuditURL
+	}
+	if c.PprofAddress != nil && !flags["pprof-address"] {
+		cfg.PPROFAddress = *c.PprofAddress
+	}
+	if c.ReadTimeout != nil {
+		cfg.HTTPConfig.ReadTimeout = time.Duration(*c.ReadTimeout)
+	}
+	if c.WriteTimeout != nil {
+		cfg.HTTPConfig.WriteTimeout = time.Duration(*c.WriteTimeout)
+	}
+	if c.ReadHeaderTimeout != nil {
+		cfg.HTTPConfig.ReadHeaderTimeout = time.Duration(*c.ReadHeaderTimeout)
+	}
+	if c.MaxHeaderBytes != nil {
+		cfg.HTTPConfig.MaxHeaderBytes = *c.MaxHeaderBytes
+	}
+	if c.IdleTimeout != nil {
+		cfg.HTTPConfig.IdleTimeout = time.Duration(*c.IdleTimeout)
+	}
 }
