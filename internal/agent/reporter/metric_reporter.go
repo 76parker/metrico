@@ -41,15 +41,24 @@ type systemMetricProvider interface {
 
 // MetricReporter периодически отправляет runtime- и системные метрики пакетами по HTTP.
 type MetricReporter struct {
-	client         *http.Client
-	cryptoKey      *rsa.PublicKey
-	key            string
-	reportInterval time.Duration
-	url            *url.URL
-	provider       metricProvider
-	systemProvider systemMetricProvider
-	rateLimit      int
+	client          *http.Client
+	cryptoKey       *rsa.PublicKey
+	key             string
+	reportInterval  time.Duration
+	url             *url.URL
+	provider        metricProvider
+	systemProvider  systemMetricProvider
+	rateLimit       int
+	shutdownTimeout time.Duration
 }
+
+const defaultShutdownTimeout = 5 * time.Second
+
+// SendError сообщает о неудачной отправке одного или нескольких пакетов.
+type SendError struct{ Err error }
+
+func (e *SendError) Error() string { return "send metrics: " + e.Err.Error() }
+func (e *SendError) Unwrap() error { return e.Err }
 
 // Option конфигурирует MetricReporter.
 type Option func(*MetricReporter)
@@ -112,8 +121,9 @@ func NewMetricReporter(
 		return nil
 	}
 	reporter := &MetricReporter{
-		url:       baseURL,
-		rateLimit: 1,
+		url:             baseURL,
+		rateLimit:       1,
+		shutdownTimeout: defaultShutdownTimeout,
 	}
 	for _, option := range options {
 		option(reporter)
@@ -125,9 +135,25 @@ func NewMetricReporter(
 }
 
 // Run отправляет метрики до отмены ctx и ожидает завершения отправителей.
-// Возвращает ошибку контекста при остановке; ошибки отдельных отправок журналируются.
-// Для ограничения ожидания текущих HTTP-запросов настройте таймаут клиента.
+// При успешном завершении возвращает ошибку контекста, иначе — ошибки отправки.
+// После отмены контекста на завершение отправок отводится ограниченное время.
 func (r *MetricReporter) Run(ctx context.Context) error {
+	sendCtx, cancelSend := context.WithCancelCause(context.Background())
+	done := make(chan struct{})
+	defer func() { close(done); cancelSend(context.Canceled) }()
+	go func() {
+		select {
+		case <-ctx.Done():
+			timer := time.NewTimer(r.shutdownTimeout)
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+				cancelSend(context.DeadlineExceeded)
+			case <-done:
+			}
+		case <-done:
+		}
+	}()
 	reportTicker := time.NewTicker(r.reportInterval)
 	defer reportTicker.Stop()
 	jobs := make(chan []metrics.Metrics, r.rateLimit)
@@ -139,7 +165,7 @@ func (r *MetricReporter) Run(ctx context.Context) error {
 		go func() {
 			defer workers.Done()
 			for batch := range jobs {
-				if err := r.sendBatch(batch); err != nil {
+				if err := r.sendBatchContext(sendCtx, batch); err != nil {
 					errMu.Lock()
 					sendErr = errors.Join(sendErr, err)
 					errMu.Unlock()
@@ -155,27 +181,49 @@ func (r *MetricReporter) Run(ctx context.Context) error {
 		}
 		return result
 	}
+	var pending []metrics.Metrics
+loop:
 	for {
 		select {
 		case <-reportTicker.C:
-			// После чтения PollCount пакет обязательно должен попасть в очередь.
-			jobs <- batch()
+			pending = batch()
+			select {
+			case jobs <- pending:
+				pending = nil
+			case <-ctx.Done():
+				break loop
+			}
 		case <-ctx.Done():
-			if p, ok := r.provider.(interface{ Wait() }); ok {
-				p.Wait()
-			}
-			if p, ok := r.systemProvider.(interface{ Wait() }); ok {
-				p.Wait()
-			}
-			jobs <- batch()
-			close(jobs)
-			workers.Wait()
-			if sendErr != nil {
-				return errors.Join(ctx.Err(), sendErr)
-			}
-			return ctx.Err()
+			break loop
 		}
 	}
+	if p, ok := r.provider.(interface{ Wait() }); ok {
+		p.Wait()
+	}
+	if p, ok := r.systemProvider.(interface{ Wait() }); ok {
+		p.Wait()
+	}
+	enqueue := func(b []metrics.Metrics) bool {
+		select {
+		case <-sendCtx.Done():
+			return false
+		case jobs <- b:
+			return true
+		}
+	}
+	queued := pending == nil || enqueue(pending)
+	if queued {
+		queued = enqueue(batch())
+	}
+	close(jobs)
+	workers.Wait()
+	if !queued || sendCtx.Err() != nil {
+		sendErr = errors.Join(sendErr, context.Cause(sendCtx))
+	}
+	if sendErr != nil {
+		return &SendError{Err: sendErr}
+	}
+	return ctx.Err()
 }
 
 func (r *MetricReporter) sendMetrics(runtimeMetrics runtime.MemStats, pollCount int64) error {
@@ -229,6 +277,10 @@ func newCounterMetric(metricValue int64, metricName string) metrics.Metrics {
 }
 
 func (r *MetricReporter) sendBatch(metricsBatch []metrics.Metrics) error {
+	return r.sendBatchContext(context.Background(), metricsBatch)
+}
+
+func (r *MetricReporter) sendBatchContext(ctx context.Context, metricsBatch []metrics.Metrics) error {
 	body, err := goccyjson.Marshal(metricsBatch)
 	if err != nil {
 		return fmt.Errorf("marshal metric batch: %w", err)
@@ -247,8 +299,8 @@ func (r *MetricReporter) sendBatch(metricsBatch []metrics.Metrics) error {
 			response.Body.Close()
 		}
 	}()
-	err = withRetry(func() error {
-		request, err := http.NewRequest(http.MethodPost, r.batchUpdateURL(), bytes.NewReader(body))
+	err = withRetry(ctx, func() error {
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, r.batchUpdateURL(), bytes.NewReader(body))
 		if err != nil {
 			return fmt.Errorf("create batch update request: %w", err)
 		}

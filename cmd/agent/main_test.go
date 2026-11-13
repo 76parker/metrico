@@ -1,10 +1,24 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"github.com/76Parker/metrico/internal/agent/reporter"
 	"github.com/76Parker/metrico/internal/jsonconfig"
 	"testing"
 	"time"
 )
+
+func TestReporterError(t *testing.T) {
+	if err := reporterError(fmt.Errorf("wrapped: %w", context.Canceled)); err != nil {
+		t.Fatalf("wrapped cancellation: %v", err)
+	}
+	sendErr := &reporter.SendError{Err: context.Canceled}
+	if err := reporterError(sendErr); !errors.Is(err, sendErr) {
+		t.Fatalf("send error = %v, want %v", err, sendErr)
+	}
+}
 
 func TestResolveRateLimit_Default(t *testing.T) {
 	got, err := resolveRateLimit(0, false, 0, false)

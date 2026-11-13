@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rsa"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -150,9 +151,20 @@ func main() {
 		reporter.WithRateLimit(rateLimit),
 		reporter.WithSystemMetricProvider(systemProvider),
 	)
-	if err := reporter.Run(ctx); err != nil && err != context.Canceled {
+	if err := reporterError(reporter.Run(ctx)); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func reporterError(err error) error {
+	var sendErr *reporter.SendError
+	if errors.As(err, &sendErr) {
+		return err
+	}
+	if errors.Is(err, context.Canceled) {
+		return nil
+	}
+	return err
 }
 
 func applyEnvOverrides() (envConfig, error) {
