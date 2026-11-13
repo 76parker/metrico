@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -32,6 +33,7 @@ type application struct {
 	server            *http.Server
 	diagnostics       *http.Server
 	backgroundWorkers []runner
+	snapshotter       *metrics.SnapshotCoordinator
 
 	cleanupStack cleanupStack
 
@@ -83,6 +85,7 @@ func newApplication(ctx context.Context, cfg config.Config, log logger.Logger) (
 
 	metricsOptions := make([]metrics.ApplicationOption, 0, 1)
 	if storage.snapshotter != nil {
+		app.snapshotter = storage.snapshotter
 		metricsOptions = append(metricsOptions, metrics.WithSnapshotter(storage.snapshotter))
 		if cfg.SnapshotServiceConfig.StoreInterval > 0 {
 			app.backgroundWorkers = append(app.backgroundWorkers, storage.snapshotter)
@@ -142,6 +145,9 @@ func newAuditPublisher(cfg config.Audit, log logger.Logger, cleanups *cleanupSta
 
 func (a *application) run(ctx context.Context) error {
 	group, groupCtx := errgroup.WithContext(ctx)
+	workerCtx, stopWorkers := context.WithCancel(context.Background())
+	defer stopWorkers()
+	var workerWG sync.WaitGroup
 
 	servers := []*http.Server{a.server}
 	if a.diagnostics != nil {
@@ -156,8 +162,10 @@ func (a *application) run(ctx context.Context) error {
 	// Запускаем фоновые сервисы в отдельных горутинах
 	for _, worker := range a.backgroundWorkers {
 		worker := worker
+		workerWG.Add(1)
 		group.Go(func() error {
-			err := worker.Run(groupCtx)
+			defer workerWG.Done()
+			err := worker.Run(workerCtx)
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}
@@ -180,7 +188,17 @@ func (a *application) run(ctx context.Context) error {
 				return nil
 			})
 		}
-		return shutdowns.Wait()
+		shutdownErr := shutdowns.Wait()
+		stopWorkers()
+		workerWG.Wait()
+		if a.snapshotter != nil {
+			snapshotCtx, cancel := context.WithTimeout(context.Background(), a.shutdownTimeout)
+			defer cancel()
+			if err := a.snapshotter.Save(snapshotCtx); err != nil {
+				shutdownErr = errors.Join(shutdownErr, fmt.Errorf("save final snapshot: %w", err))
+			}
+		}
+		return shutdownErr
 	})
 	return group.Wait()
 }

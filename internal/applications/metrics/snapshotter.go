@@ -124,3 +124,6 @@ func (s *SnapshotCoordinator) runSync(ctx context.Context) error {
 	}
 	return s.store.Save(ctx, metrics)
 }
+
+// Save сохраняет текущий снимок хранилища.
+func (s *SnapshotCoordinator) Save(ctx context.Context) error { return s.runSync(ctx) }

@@ -2,7 +2,9 @@ package reporter
 
 import (
 	"context"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
@@ -47,7 +49,7 @@ func TestMetricReporter_RunLimitsConcurrentRequests(t *testing.T) {
 		time.Sleep(30 * time.Millisecond)
 		cancel()
 	}()
-	if err := reporter.Run(ctx); err != context.Canceled {
+	if err := reporter.Run(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Run() error = %v, want context.Canceled", err)
 	}
 	if got := atomic.LoadInt32(&maxActive); got > 2 {
@@ -58,6 +60,19 @@ func TestMetricReporter_RunLimitsConcurrentRequests(t *testing.T) {
 type staticProvider struct{}
 
 func (staticProvider) Metrics() (runtime.MemStats, int64) { return runtime.MemStats{}, 1 }
+
+type queueTestProvider struct {
+	calls atomic.Int32
+	full  chan struct{}
+}
+
+func (p *queueTestProvider) Metrics() (runtime.MemStats, int64) {
+	count := p.calls.Add(1)
+	if count == 3 {
+		close(p.full)
+	}
+	return runtime.MemStats{}, int64(count)
+}
 
 /*
  * Тесты с постфиксом _Valid проверяют корректно ли код обрабатывает валидные входные данные
@@ -243,3 +258,174 @@ func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error)
 // 		}
 // 	}
 // }
+
+func TestRunFlushesAfterCancellation(t *testing.T) {
+	var calls atomic.Int32
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls.Add(1)
+		var batch []metrics.Metrics
+		require.NoError(t, goccyjson.NewDecoder(request.Body).Decode(&batch))
+		var count int64
+		for _, metric := range batch {
+			if metric.ID == "PollCount" {
+				count = *metric.Delta
+			}
+		}
+		require.Equal(t, int64(1), count)
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(""))}, nil
+	})}
+	r := NewMetricReporter("http://example.test", WithHTTPClient(client), WithMetricProvider(staticProvider{}), WithReportInterval(time.Hour))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.ErrorIs(t, r.Run(ctx), context.Canceled)
+	require.Equal(t, int32(1), calls.Load())
+}
+
+func TestRunReportsFlushFailure(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusBadRequest, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(""))}, nil
+	})}
+	r := NewMetricReporter("http://example.test", WithHTTPClient(client), WithMetricProvider(staticProvider{}), WithReportInterval(time.Hour))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := r.Run(ctx)
+	require.ErrorContains(t, err, "unexpected status code: 400")
+	require.NotErrorIs(t, err, context.Canceled)
+}
+
+func TestRunFlushTimeout(t *testing.T) {
+	started := make(chan struct{}, 1)
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		started <- struct{}{}
+		<-req.Context().Done()
+		return nil, req.Context().Err()
+	})}
+	r := NewMetricReporter("http://example.test", WithHTTPClient(client), WithMetricProvider(staticProvider{}), WithReportInterval(time.Hour))
+	r.shutdownTimeout = 50 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result := make(chan error, 1)
+	go func() { result <- r.Run(ctx) }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("final request did not start")
+	}
+	select {
+	case err := <-result:
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.NotErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("Run did not stop after the flush timeout")
+	}
+}
+
+func TestRunTimeoutWithFullQueue(t *testing.T) {
+	started := make(chan struct{}, 1)
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-req.Context().Done()
+		return nil, req.Context().Err()
+	})}
+	provider := &queueTestProvider{full: make(chan struct{})}
+	r := NewMetricReporter("http://example.test", WithHTTPClient(client), WithMetricProvider(provider), WithReportInterval(time.Millisecond), WithRateLimit(1))
+	r.shutdownTimeout = 50 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := make(chan error, 1)
+	go func() { result <- r.Run(ctx) }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("request did not start")
+	}
+	select {
+	case <-provider.full:
+	case <-time.After(time.Second):
+		t.Fatal("queue did not fill")
+	}
+	cancel()
+	select {
+	case err := <-result:
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	case <-time.After(time.Second):
+		t.Fatal("Run blocked on the full queue")
+	}
+}
+
+func TestRunFlushesPendingBatch(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	counts := make(chan int64, 20)
+	var calls atomic.Int32
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		var batch []metrics.Metrics
+		if err := goccyjson.NewDecoder(req.Body).Decode(&batch); err != nil {
+			return nil, err
+		}
+		for _, metric := range batch {
+			if metric.ID == "PollCount" {
+				counts <- *metric.Delta
+			}
+		}
+		if calls.Add(1) == 1 {
+			close(started)
+			<-release
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(""))}, nil
+	})}
+	provider := &queueTestProvider{full: make(chan struct{})}
+	r := NewMetricReporter("http://example.test", WithHTTPClient(client), WithMetricProvider(provider), WithReportInterval(time.Millisecond))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := make(chan error, 1)
+	go func() { result <- r.Run(ctx) }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("request did not start")
+	}
+	select {
+	case <-provider.full:
+	case <-time.After(time.Second):
+		t.Fatal("queue did not fill")
+	}
+	cancel()
+	close(release)
+	select {
+	case err := <-result:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("Run did not finish")
+	}
+	for _, want := range []int64{1, 2, 3} {
+		select {
+		case got := <-counts:
+			require.Equal(t, want, got)
+		default:
+			t.Fatalf("missing batch with PollCount %d", want)
+		}
+	}
+}
+
+func TestRetryStopsDuringBackoff(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	started := make(chan struct{})
+	go func() {
+		<-started
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+	calls := 0
+	err := withRetry(ctx, func() error {
+		calls++
+		close(started)
+		return &net.OpError{Op: "dial", Err: errors.New("connection failed")}
+	})
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, 1, calls)
+}
