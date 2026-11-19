@@ -43,6 +43,7 @@ type Server struct {
 	AuditFile         *string   `json:"audit_file"`
 	AuditURL          *string   `json:"audit_url"`
 	PprofAddress      *string   `json:"pprof_address"`
+	TrustedSubnet     *string   `json:"trusted_subnet"`
 	ReadTimeout       *Duration `json:"read_timeout"`
 	WriteTimeout      *Duration `json:"write_timeout"`
 	ReadHeaderTimeout *Duration `json:"read_header_timeout"`

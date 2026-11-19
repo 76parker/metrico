@@ -2,6 +2,7 @@ package config
 
 import (
 	"crypto/rsa"
+	"net"
 	"time"
 )
 
@@ -10,6 +11,7 @@ type HTTP struct {
 	Address           string          `yaml:"address"`
 	CryptoKey         *rsa.PrivateKey `yaml:"-"`
 	HashKey           string          `yaml:"hash_key"`
+	TrustedSubnet     *net.IPNet      `yaml:"-"`
 	ReadTimeout       time.Duration   `yaml:"read_timeout"`
 	WriteTimeout      time.Duration   `yaml:"write_timeout"`
 	ReadHeaderTimeout time.Duration   `yaml:"read_header_timeout"`

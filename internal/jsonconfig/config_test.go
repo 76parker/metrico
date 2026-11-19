@@ -11,17 +11,17 @@ import (
 
 func TestLoad(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, []byte(`{"address":"","restore":false,"store_interval":"500ms","max_header_bytes":0,"unknown":true}`), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"address":"","restore":false,"store_interval":"500ms","max_header_bytes":0,"trusted_subnet":"192.168.0.0/16","unknown":true}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	var cfg Server
 	if err := Load(path, &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Address == nil || *cfg.Address != "" || cfg.Restore == nil || *cfg.Restore || cfg.StoreInterval == nil || time.Duration(*cfg.StoreInterval) != 500*time.Millisecond || cfg.MaxHeaderBytes == nil || *cfg.MaxHeaderBytes != 0 {
+	if cfg.Address == nil || *cfg.Address != "" || cfg.Restore == nil || *cfg.Restore || cfg.StoreInterval == nil || time.Duration(*cfg.StoreInterval) != 500*time.Millisecond || cfg.MaxHeaderBytes == nil || *cfg.MaxHeaderBytes != 0 || cfg.TrustedSubnet == nil || *cfg.TrustedSubnet != "192.168.0.0/16" {
 		t.Fatalf("unexpected configuration: %+v", cfg)
 	}
-	for _, data := range []string{`{`, `{"store_interval":"oops"}`, `{"store_interval":1}`, `{"restore":"true"}`} {
+	for _, data := range []string{`{`, `{"store_interval":"oops"}`, `{"store_interval":1}`, `{"restore":"true"}`, `{"trusted_subnet":42}`} {
 		if err := os.WriteFile(path, []byte(data), 0600); err != nil {
 			t.Fatal(err)
 		}

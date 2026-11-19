@@ -50,6 +50,7 @@ type MetricReporter struct {
 	systemProvider  systemMetricProvider
 	rateLimit       int
 	shutdownTimeout time.Duration
+	resolveLocalIP  localIPResolver
 }
 
 const defaultShutdownTimeout = 5 * time.Second
@@ -124,6 +125,7 @@ func NewMetricReporter(
 		url:             baseURL,
 		rateLimit:       1,
 		shutdownTimeout: defaultShutdownTimeout,
+		resolveLocalIP:  routeLocalIP,
 	}
 	for _, option := range options {
 		option(reporter)
@@ -293,14 +295,14 @@ func (r *MetricReporter) sendBatchContext(ctx context.Context, metricsBatch []me
 		}
 	}
 
-	var response *http.Response
-	defer func() {
-		if response != nil {
-			response.Body.Close()
+	return withRetry(ctx, func() error {
+		attemptCtx := ctx
+		if r.client.Timeout > 0 {
+			var cancel context.CancelFunc
+			attemptCtx, cancel = context.WithTimeout(ctx, r.client.Timeout)
+			defer cancel()
 		}
-	}()
-	err = withRetry(ctx, func() error {
-		request, err := http.NewRequestWithContext(ctx, http.MethodPost, r.batchUpdateURL(), bytes.NewReader(body))
+		request, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, r.batchUpdateURL(), bytes.NewReader(body))
 		if err != nil {
 			return fmt.Errorf("create batch update request: %w", err)
 		}
@@ -311,30 +313,41 @@ func (r *MetricReporter) sendBatchContext(ctx context.Context, metricsBatch []me
 		if r.key != "" {
 			request.Header.Set(signature.HeaderName, signature.Sum(body, r.key))
 		}
+		// The copy keeps redirect handling local to this request and safe for
+		// concurrent workers sharing the configured client.
+		client := *r.client
+		checkRedirect := client.CheckRedirect
+		client.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+			if checkRedirect != nil {
+				if err := checkRedirect(next, via); err != nil {
+					return err
+				}
+			} else if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			return r.setRealIP(next, &client)
+		}
+		if err := r.setRealIP(request, &client); err != nil {
+			return err
+		}
 
-		resp, err := r.client.Do(request)
+		resp, err := client.Do(request)
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			resp.Body.Close()
 			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 		}
-		response = resp
+		contentType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+		if err != nil {
+			return fmt.Errorf("parse response content type: %w", err)
+		}
+		if contentType != "application/json" {
+			return fmt.Errorf("unexpected response content type: %s", contentType)
+		}
 		return nil
 	})
-	if err != nil {
-		return err
-	}
-	contentType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
-	if err != nil {
-		return fmt.Errorf("parse response content type: %w", err)
-	}
-	if contentType != "application/json" {
-		return fmt.Errorf("unexpected response content type: %s", contentType)
-	}
-
-	return nil
 }
 
 func (r *MetricReporter) batchUpdateURL() string {

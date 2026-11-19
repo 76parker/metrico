@@ -39,6 +39,7 @@ var (
 	databaseDSN     string // -d (or DATABASE_DSN env var)
 	cryptoKeyPath   string
 	key             string // -k (or KEY env var)
+	trustedSubnet   string // -t (or TRUSTED_SUBNET env var)
 )
 
 type envConfig struct {
@@ -53,6 +54,7 @@ type envConfig struct {
 	DatabaseDSN     string `env:"DATABASE_DSN"`
 	AuditFile       string `env:"AUDIT_FILE"`
 	AuditURL        string `env:"AUDIT_URL"`
+	TrustedSubnet   string `env:"TRUSTED_SUBNET"`
 }
 
 func (c *envConfig) applyOverrides() {
@@ -79,6 +81,9 @@ func (c *envConfig) applyOverrides() {
 	}
 	if _, ok := os.LookupEnv("DATABASE_DSN"); ok {
 		databaseDSN = c.DatabaseDSN
+	}
+	if _, ok := os.LookupEnv("TRUSTED_SUBNET"); ok {
+		trustedSubnet = c.TrustedSubnet
 	}
 }
 
@@ -110,6 +115,7 @@ func main() {
 	flag.IntVar(&storeInterval, "i", defaultStoreInterval, "store interval")           // -i
 	flag.BoolVar(&restore, "r", defaultRestore, "restore from file")                   // -r
 	flag.StringVar(&databaseDSN, "d", defaultDatabaseDSN, "database DSN")              // -d
+	registerTrustedSubnetFlag(flag.CommandLine)
 	registerAuditFlags(flag.CommandLine, &cfg.Audit)
 	registerDiagnosticsFlags(flag.CommandLine, cfg)
 
@@ -145,6 +151,10 @@ func main() {
 
 	cfg.HTTPConfig.Address = hostPort
 	cfg.HTTPConfig.HashKey = key
+	cfg.HTTPConfig.TrustedSubnet, err = parseTrustedSubnet(trustedSubnet)
+	if err != nil {
+		log.Fatal(err)
+	}
 	if cryptoKeyPath != "" {
 		cfg.HTTPConfig.CryptoKey, err = cryptomsg.LoadPrivate(cryptoKeyPath)
 		if err != nil {
@@ -174,6 +184,10 @@ func registerAuditFlags(flags *flag.FlagSet, auditCfg *config.Audit) {
 
 func registerDiagnosticsFlags(flags *flag.FlagSet, cfg *config.Config) {
 	flags.StringVar(&cfg.PPROFAddress, "pprof-address", "", "Optional numeric loopback pprof listener address")
+}
+
+func registerTrustedSubnetFlag(flags *flag.FlagSet) {
+	flags.StringVar(&trustedSubnet, "t", "", "Trusted subnet in CIDR notation")
 }
 
 func (c *envConfig) applyDiagnosticsOverrides(cfg *config.Config) {
@@ -208,6 +222,17 @@ func validateHostPort(address string) error {
 	return nil
 }
 
+func parseTrustedSubnet(value string) (*net.IPNet, error) {
+	if value == "" {
+		return nil, nil
+	}
+	_, subnet, err := net.ParseCIDR(value)
+	if err != nil {
+		return nil, fmt.Errorf("invalid trusted subnet %q: %w", value, err)
+	}
+	return subnet, nil
+}
+
 func applyJSONConfig(c jsonconfig.Server, flags map[string]bool, cfg *config.Config, interval *time.Duration) {
 	if c.Address != nil && !flags["a"] {
 		hostPort = *c.Address
@@ -238,6 +263,9 @@ func applyJSONConfig(c jsonconfig.Server, flags map[string]bool, cfg *config.Con
 	}
 	if c.PprofAddress != nil && !flags["pprof-address"] {
 		cfg.PPROFAddress = *c.PprofAddress
+	}
+	if c.TrustedSubnet != nil && !flags["t"] {
+		trustedSubnet = *c.TrustedSubnet
 	}
 	if c.ReadTimeout != nil {
 		cfg.HTTPConfig.ReadTimeout = time.Duration(*c.ReadTimeout)

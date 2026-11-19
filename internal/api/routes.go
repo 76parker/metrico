@@ -25,9 +25,11 @@ func NewRouter(
 }
 
 func newHTTPServer(cfg config.HTTP, router *gin.Engine) *http.Server {
+	handler := middleware.VerifyAndSign(middleware.DecryptRequest(router, cfg.CryptoKey), cfg.HashKey)
+	handler = middleware.TrustedSubnet(handler, cfg.TrustedSubnet, cfg.HashKey)
 	return &http.Server{
 		Addr:              cfg.Address,
-		Handler:           middleware.VerifyAndSign(middleware.DecryptRequest(router, cfg.CryptoKey), cfg.HashKey),
+		Handler:           handler,
 		ReadTimeout:       cfg.ReadTimeout,
 		WriteTimeout:      cfg.WriteTimeout,
 		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
