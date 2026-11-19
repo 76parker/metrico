@@ -39,10 +39,12 @@ var (
 	databaseDSN     string // -d (or DATABASE_DSN env var)
 	cryptoKeyPath   string
 	key             string // -k (or KEY env var)
+	trustedSubnet   string // -t (or TRUSTED_SUBNET env var)
 )
 
 type envConfig struct {
 	CryptoKey       string `env:"CRYPTO_KEY"`
+	GRPCAddress     string `env:"GRPC_ADDRESS"`
 	PPROFAddress    string `env:"PPROF_ADDRESS"`
 	Addr            string `env:"ADDRESS"`
 	Key             string `env:"KEY"`
@@ -53,6 +55,7 @@ type envConfig struct {
 	DatabaseDSN     string `env:"DATABASE_DSN"`
 	AuditFile       string `env:"AUDIT_FILE"`
 	AuditURL        string `env:"AUDIT_URL"`
+	TrustedSubnet   string `env:"TRUSTED_SUBNET"`
 }
 
 func (c *envConfig) applyOverrides() {
@@ -79,6 +82,9 @@ func (c *envConfig) applyOverrides() {
 	}
 	if _, ok := os.LookupEnv("DATABASE_DSN"); ok {
 		databaseDSN = c.DatabaseDSN
+	}
+	if _, ok := os.LookupEnv("TRUSTED_SUBNET"); ok {
+		trustedSubnet = c.TrustedSubnet
 	}
 }
 
@@ -110,8 +116,10 @@ func main() {
 	flag.IntVar(&storeInterval, "i", defaultStoreInterval, "store interval")           // -i
 	flag.BoolVar(&restore, "r", defaultRestore, "restore from file")                   // -r
 	flag.StringVar(&databaseDSN, "d", defaultDatabaseDSN, "database DSN")              // -d
+	registerTrustedSubnetFlag(flag.CommandLine)
 	registerAuditFlags(flag.CommandLine, &cfg.Audit)
 	registerDiagnosticsFlags(flag.CommandLine, cfg)
+	registerGRPCFlags(flag.CommandLine, cfg)
 
 	flag.Parse()
 	visited := map[string]bool{}
@@ -138,13 +146,23 @@ func main() {
 	}
 	configFromEnv.applyAuditOverrides(&cfg.Audit)
 	configFromEnv.applyDiagnosticsOverrides(cfg)
+	configFromEnv.applyGRPCOverrides(cfg)
 
 	if err := validateHostPort(hostPort); err != nil {
 		log.Fatalf("invalid server address: %v", err)
 	}
+	if cfg.GRPCAddress != "" {
+		if err := validateHostPort(cfg.GRPCAddress); err != nil {
+			log.Fatalf("invalid gRPC server address: %v", err)
+		}
+	}
 
 	cfg.HTTPConfig.Address = hostPort
 	cfg.HTTPConfig.HashKey = key
+	cfg.HTTPConfig.TrustedSubnet, err = parseTrustedSubnet(trustedSubnet)
+	if err != nil {
+		log.Fatal(err)
+	}
 	if cryptoKeyPath != "" {
 		cfg.HTTPConfig.CryptoKey, err = cryptomsg.LoadPrivate(cryptoKeyPath)
 		if err != nil {
@@ -176,9 +194,23 @@ func registerDiagnosticsFlags(flags *flag.FlagSet, cfg *config.Config) {
 	flags.StringVar(&cfg.PPROFAddress, "pprof-address", "", "Optional numeric loopback pprof listener address")
 }
 
+func registerGRPCFlags(flags *flag.FlagSet, cfg *config.Config) {
+	flags.StringVar(&cfg.GRPCAddress, "grpc-address", "", "Optional gRPC listener address")
+}
+
+func registerTrustedSubnetFlag(flags *flag.FlagSet) {
+	flags.StringVar(&trustedSubnet, "t", "", "Trusted subnet in CIDR notation")
+}
+
 func (c *envConfig) applyDiagnosticsOverrides(cfg *config.Config) {
 	if _, hasValue := os.LookupEnv("PPROF_ADDRESS"); hasValue {
 		cfg.PPROFAddress = c.PPROFAddress
+	}
+}
+
+func (c *envConfig) applyGRPCOverrides(cfg *config.Config) {
+	if _, hasValue := os.LookupEnv("GRPC_ADDRESS"); hasValue {
+		cfg.GRPCAddress = c.GRPCAddress
 	}
 }
 
@@ -208,9 +240,23 @@ func validateHostPort(address string) error {
 	return nil
 }
 
+func parseTrustedSubnet(value string) (*net.IPNet, error) {
+	if value == "" {
+		return nil, nil
+	}
+	_, subnet, err := net.ParseCIDR(value)
+	if err != nil {
+		return nil, fmt.Errorf("invalid trusted subnet %q: %w", value, err)
+	}
+	return subnet, nil
+}
+
 func applyJSONConfig(c jsonconfig.Server, flags map[string]bool, cfg *config.Config, interval *time.Duration) {
 	if c.Address != nil && !flags["a"] {
 		hostPort = *c.Address
+	}
+	if c.GRPCAddress != nil && !flags["grpc-address"] {
+		cfg.GRPCAddress = *c.GRPCAddress
 	}
 	if c.Key != nil && !flags["k"] {
 		key = *c.Key
@@ -238,6 +284,9 @@ func applyJSONConfig(c jsonconfig.Server, flags map[string]bool, cfg *config.Con
 	}
 	if c.PprofAddress != nil && !flags["pprof-address"] {
 		cfg.PPROFAddress = *c.PprofAddress
+	}
+	if c.TrustedSubnet != nil && !flags["t"] {
+		trustedSubnet = *c.TrustedSubnet
 	}
 	if c.ReadTimeout != nil {
 		cfg.HTTPConfig.ReadTimeout = time.Duration(*c.ReadTimeout)

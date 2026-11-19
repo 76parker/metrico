@@ -8,11 +8,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config объединяет настройки HTTP, диагностики, хранилищ и аудита сервера.
-// PPROFAddress задаётся флагом или переменной окружения и не загружается из YAML.
+// Config объединяет настройки HTTP, gRPC, диагностики, хранилищ и аудита сервера.
+// PPROFAddress и GRPCAddress не загружаются из YAML.
 type Config struct {
 	// PPROFAddress задаёт числовой loopback-адрес диагностики; пустой адрес отключает pprof.
 	PPROFAddress string `yaml:"-"`
+	// GRPCAddress задаёт адрес gRPC-сервера; пустой адрес отключает gRPC.
+	GRPCAddress string `yaml:"-"`
 	// HTTPConfig содержит настройки основного HTTP-сервера.
 	HTTPConfig HTTP `yaml:"http"`
 	// SnapshotServiceConfig содержит настройки снимков хранилища в памяти.

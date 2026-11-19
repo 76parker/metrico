@@ -86,6 +86,9 @@ func TestSendMetrics_Valid(t *testing.T) {
 		require.Equal(t, http.MethodPost, r.Method)
 		require.Equal(t, "/updates", r.URL.Path)
 		require.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		remoteIP, _, err := net.SplitHostPort(r.RemoteAddr)
+		require.NoError(t, err)
+		require.Equal(t, net.ParseIP(remoteIP), net.ParseIP(r.Header.Get("X-Real-IP")))
 
 		var got []metrics.Metrics
 		require.NoError(t, goccyjson.NewDecoder(r.Body).Decode(&got))
@@ -157,6 +160,7 @@ func TestSendMetrics_WithKey(t *testing.T) {
 		WithHTTPClient(client),
 		WithReportInterval(time.Second),
 		WithKey(key),
+		withTestLocalIP(),
 	)
 
 	err := reporter.sendMetrics(runtime.MemStats{}, 0)
@@ -210,6 +214,14 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
 	return fn(request)
+}
+
+func withTestLocalIP() Option {
+	return func(r *MetricReporter) {
+		r.resolveLocalIP = func(context.Context, *http.Client, *http.Request) (string, error) {
+			return "192.0.2.1", nil
+		}
+	}
 }
 
 // func TestIntegration(t *testing.T) {
@@ -274,7 +286,7 @@ func TestRunFlushesAfterCancellation(t *testing.T) {
 		require.Equal(t, int64(1), count)
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(""))}, nil
 	})}
-	r := NewMetricReporter("http://example.test", WithHTTPClient(client), WithMetricProvider(staticProvider{}), WithReportInterval(time.Hour))
+	r := NewMetricReporter("http://example.test", WithHTTPClient(client), WithMetricProvider(staticProvider{}), WithReportInterval(time.Hour), withTestLocalIP())
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	require.ErrorIs(t, r.Run(ctx), context.Canceled)
@@ -285,7 +297,7 @@ func TestRunReportsFlushFailure(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusBadRequest, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(""))}, nil
 	})}
-	r := NewMetricReporter("http://example.test", WithHTTPClient(client), WithMetricProvider(staticProvider{}), WithReportInterval(time.Hour))
+	r := NewMetricReporter("http://example.test", WithHTTPClient(client), WithMetricProvider(staticProvider{}), WithReportInterval(time.Hour), withTestLocalIP())
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	err := r.Run(ctx)
@@ -300,7 +312,7 @@ func TestRunFlushTimeout(t *testing.T) {
 		<-req.Context().Done()
 		return nil, req.Context().Err()
 	})}
-	r := NewMetricReporter("http://example.test", WithHTTPClient(client), WithMetricProvider(staticProvider{}), WithReportInterval(time.Hour))
+	r := NewMetricReporter("http://example.test", WithHTTPClient(client), WithMetricProvider(staticProvider{}), WithReportInterval(time.Hour), withTestLocalIP())
 	r.shutdownTimeout = 50 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -331,7 +343,7 @@ func TestRunTimeoutWithFullQueue(t *testing.T) {
 		return nil, req.Context().Err()
 	})}
 	provider := &queueTestProvider{full: make(chan struct{})}
-	r := NewMetricReporter("http://example.test", WithHTTPClient(client), WithMetricProvider(provider), WithReportInterval(time.Millisecond), WithRateLimit(1))
+	r := NewMetricReporter("http://example.test", WithHTTPClient(client), WithMetricProvider(provider), WithReportInterval(time.Millisecond), WithRateLimit(1), withTestLocalIP())
 	r.shutdownTimeout = 50 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -378,7 +390,7 @@ func TestRunFlushesPendingBatch(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(""))}, nil
 	})}
 	provider := &queueTestProvider{full: make(chan struct{})}
-	r := NewMetricReporter("http://example.test", WithHTTPClient(client), WithMetricProvider(provider), WithReportInterval(time.Millisecond))
+	r := NewMetricReporter("http://example.test", WithHTTPClient(client), WithMetricProvider(provider), WithReportInterval(time.Millisecond), withTestLocalIP())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	result := make(chan error, 1)

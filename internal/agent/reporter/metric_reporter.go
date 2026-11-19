@@ -1,4 +1,4 @@
-// Package reporter подготавливает и отправляет пакеты метрик HTTP-серверу.
+// Package reporter подготавливает и отправляет пакеты метрик по HTTP или gRPC.
 package reporter
 
 import (
@@ -18,6 +18,7 @@ import (
 
 	"github.com/76Parker/metrico/internal/cryptomsg"
 	"github.com/76Parker/metrico/internal/domain/metrics"
+	metricspb "github.com/76Parker/metrico/internal/proto"
 	"github.com/76Parker/metrico/internal/signature"
 	goccyjson "github.com/goccy/go-json"
 )
@@ -39,7 +40,7 @@ type systemMetricProvider interface {
 	Metrics() []metrics.Metrics
 }
 
-// MetricReporter периодически отправляет runtime- и системные метрики пакетами по HTTP.
+// MetricReporter периодически отправляет runtime- и системные метрики пакетами.
 type MetricReporter struct {
 	client          *http.Client
 	cryptoKey       *rsa.PublicKey
@@ -50,6 +51,10 @@ type MetricReporter struct {
 	systemProvider  systemMetricProvider
 	rateLimit       int
 	shutdownTimeout time.Duration
+	resolveLocalIP  localIPResolver
+	grpcClient      metricspb.MetricsClient
+	grpcAddress     string
+	resolveGRPCIP   func(context.Context, string) (string, error)
 }
 
 const defaultShutdownTimeout = 5 * time.Second
@@ -67,6 +72,14 @@ type Option func(*MetricReporter)
 func WithHTTPClient(client *http.Client) Option {
 	return func(reporter *MetricReporter) {
 		reporter.client = client
+	}
+}
+
+// WithGRPCClient selects gRPC instead of HTTP for sending metric batches.
+func WithGRPCClient(client metricspb.MetricsClient, address string) Option {
+	return func(reporter *MetricReporter) {
+		reporter.grpcClient = client
+		reporter.grpcAddress = address
 	}
 }
 
@@ -110,8 +123,8 @@ func WithSystemMetricProvider(provider systemMetricProvider) Option {
 }
 
 // NewMetricReporter разбирает адрес сервера и применяет опции отправки.
-// При ошибке разбора URL возвращает nil. Для Run задайте HTTP-клиент, источник
-// runtime-метрик и положительный интервал соответствующими опциями.
+// При ошибке разбора URL возвращает nil. Для Run задайте HTTP- или gRPC-клиент,
+// источник runtime-метрик и положительный интервал соответствующими опциями.
 func NewMetricReporter(
 	serverAddr string,
 	options ...Option,
@@ -124,6 +137,8 @@ func NewMetricReporter(
 		url:             baseURL,
 		rateLimit:       1,
 		shutdownTimeout: defaultShutdownTimeout,
+		resolveLocalIP:  routeLocalIP,
+		resolveGRPCIP:   routeLocalIPToAddress,
 	}
 	for _, option := range options {
 		option(reporter)
@@ -281,6 +296,9 @@ func (r *MetricReporter) sendBatch(metricsBatch []metrics.Metrics) error {
 }
 
 func (r *MetricReporter) sendBatchContext(ctx context.Context, metricsBatch []metrics.Metrics) error {
+	if r.grpcClient != nil {
+		return r.sendGRPCBatch(ctx, metricsBatch)
+	}
 	body, err := goccyjson.Marshal(metricsBatch)
 	if err != nil {
 		return fmt.Errorf("marshal metric batch: %w", err)
@@ -293,14 +311,14 @@ func (r *MetricReporter) sendBatchContext(ctx context.Context, metricsBatch []me
 		}
 	}
 
-	var response *http.Response
-	defer func() {
-		if response != nil {
-			response.Body.Close()
+	return withRetry(ctx, func() error {
+		attemptCtx := ctx
+		if r.client.Timeout > 0 {
+			var cancel context.CancelFunc
+			attemptCtx, cancel = context.WithTimeout(ctx, r.client.Timeout)
+			defer cancel()
 		}
-	}()
-	err = withRetry(ctx, func() error {
-		request, err := http.NewRequestWithContext(ctx, http.MethodPost, r.batchUpdateURL(), bytes.NewReader(body))
+		request, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, r.batchUpdateURL(), bytes.NewReader(body))
 		if err != nil {
 			return fmt.Errorf("create batch update request: %w", err)
 		}
@@ -311,30 +329,41 @@ func (r *MetricReporter) sendBatchContext(ctx context.Context, metricsBatch []me
 		if r.key != "" {
 			request.Header.Set(signature.HeaderName, signature.Sum(body, r.key))
 		}
+		// The copy keeps redirect handling local to this request and safe for
+		// concurrent workers sharing the configured client.
+		client := *r.client
+		checkRedirect := client.CheckRedirect
+		client.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+			if checkRedirect != nil {
+				if err := checkRedirect(next, via); err != nil {
+					return err
+				}
+			} else if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			return r.setRealIP(next, &client)
+		}
+		if err := r.setRealIP(request, &client); err != nil {
+			return err
+		}
 
-		resp, err := r.client.Do(request)
+		resp, err := client.Do(request)
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			resp.Body.Close()
 			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 		}
-		response = resp
+		contentType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+		if err != nil {
+			return fmt.Errorf("parse response content type: %w", err)
+		}
+		if contentType != "application/json" {
+			return fmt.Errorf("unexpected response content type: %s", contentType)
+		}
 		return nil
 	})
-	if err != nil {
-		return err
-	}
-	contentType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
-	if err != nil {
-		return fmt.Errorf("parse response content type: %w", err)
-	}
-	if contentType != "application/json" {
-		return fmt.Errorf("unexpected response content type: %s", contentType)
-	}
-
-	return nil
 }
 
 func (r *MetricReporter) batchUpdateURL() string {

@@ -21,6 +21,7 @@ import (
 	"github.com/76Parker/metrico/internal/applications/health"
 	"github.com/76Parker/metrico/internal/applications/metrics"
 	"github.com/76Parker/metrico/internal/config"
+	"github.com/76Parker/metrico/internal/grpcapi"
 	"github.com/76Parker/metrico/pkg/logger"
 )
 
@@ -32,6 +33,7 @@ type runner interface {
 type application struct {
 	server            *http.Server
 	diagnostics       *http.Server
+	grpcServer        *grpcapi.Server
 	backgroundWorkers []runner
 	snapshotter       *metrics.SnapshotCoordinator
 
@@ -96,6 +98,13 @@ func newApplication(ctx context.Context, cfg config.Config, log logger.Logger) (
 		metrics.NewService(storage.repository),
 		metricsOptions...,
 	)
+	if cfg.GRPCAddress != "" {
+		var publisher grpcapi.AuditPublisher
+		if auditPublisher != nil {
+			publisher = auditPublisher
+		}
+		app.grpcServer = grpcapi.NewServer(cfg.GRPCAddress, metricsApplication, cfg.HTTPConfig.TrustedSubnet, publisher)
+	}
 	healthApplication := health.NewApplication(storage.healthPinger)
 	handlerOptions := make([]handlers.MetricsHandlerOption, 0, 1)
 	if auditPublisher != nil {
@@ -158,6 +167,9 @@ func (a *application) run(ctx context.Context) error {
 			return a.startHTTPServer(server)
 		})
 	}
+	if a.grpcServer != nil {
+		group.Go(a.grpcServer.Serve)
+	}
 
 	// Запускаем фоновые сервисы в отдельных горутинах
 	for _, worker := range a.backgroundWorkers {
@@ -173,7 +185,7 @@ func (a *application) run(ctx context.Context) error {
 		})
 	}
 
-	// Ожидаем сигнала завершения и выключаем HTTP сервер
+	// Ожидаем сигнала завершения и выключаем серверы.
 	group.Go(func() error {
 		<-groupCtx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), a.shutdownTimeout)
@@ -187,6 +199,9 @@ func (a *application) run(ctx context.Context) error {
 				}
 				return nil
 			})
+		}
+		if a.grpcServer != nil {
+			shutdowns.Go(func() error { return a.grpcServer.Shutdown(shutdownCtx) })
 		}
 		shutdownErr := shutdowns.Wait()
 		stopWorkers()

@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -30,7 +31,20 @@ func TestSendEncryptedBatch(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 	})
-	server := httptest.NewServer(middleware.VerifyAndSign(middleware.DecryptRequest(handler, key), "secret"))
+	server := httptest.NewUnstartedServer(nil)
+	host, _, err := net.SplitHostPort(server.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ip := net.ParseIP(host)
+	bits := 128
+	if ip.To4() != nil {
+		ip = ip.To4()
+		bits = 32
+	}
+	subnet := &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, bits)}
+	server.Config.Handler = middleware.TrustedSubnet(middleware.VerifyAndSign(middleware.DecryptRequest(handler, key), "secret"), subnet, "secret")
+	server.Start()
 	defer server.Close()
 	reporter := NewMetricReporter(server.URL, WithHTTPClient(server.Client()), WithCryptoKey(&key.PublicKey), WithKey("secret"))
 	value := 42.0

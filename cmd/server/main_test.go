@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"github.com/76Parker/metrico/internal/jsonconfig"
 	"os"
 	"testing"
 	"time"
@@ -11,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/76Parker/metrico/internal/config"
+	"github.com/76Parker/metrico/internal/jsonconfig"
 )
 
 func TestEnvConfig_ApplyOverridesKey(t *testing.T) {
@@ -137,4 +137,111 @@ func TestJSONConfigAndOverrides(t *testing.T) {
 		t.Fatalf("store path = %q", fileStoragePath)
 	}
 }
+
+func TestTrustedSubnetConfiguration(t *testing.T) {
+	oldAddr, oldPath, oldStore, oldRestore, oldDSN, oldCrypto, oldKey, oldSubnet := hostPort, fileStoragePath, storeInterval, restore, databaseDSN, cryptoKeyPath, key, trustedSubnet
+	t.Cleanup(func() {
+		hostPort, fileStoragePath, storeInterval, restore, databaseDSN, cryptoKeyPath, key, trustedSubnet = oldAddr, oldPath, oldStore, oldRestore, oldDSN, oldCrypto, oldKey, oldSubnet
+	})
+	for _, tc := range []struct {
+		name string
+		file *string
+		args []string
+		env  *string
+		want string
+	}{
+		{name: "disabled by default"},
+		{name: "JSON", file: ptr("10.0.0.0/8"), want: "10.0.0.0/8"},
+		{name: "flag overrides JSON", file: ptr("10.0.0.0/8"), args: []string{"-t", "192.168.0.0/16"}, want: "192.168.0.0/16"},
+		{name: "empty flag disables JSON", file: ptr("10.0.0.0/8"), args: []string{"-t", ""}},
+		{name: "environment overrides flag", file: ptr("10.0.0.0/8"), args: []string{"-t", "192.168.0.0/16"}, env: ptr("2001:db8::/32"), want: "2001:db8::/32"},
+		{name: "empty environment disables flag", file: ptr("10.0.0.0/8"), args: []string{"-t", "192.168.0.0/16"}, env: ptr("")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("TRUSTED_SUBNET", "")
+			require.NoError(t, os.Unsetenv("TRUSTED_SUBNET"))
+			if tc.env != nil {
+				t.Setenv("TRUSTED_SUBNET", *tc.env)
+			}
+			flags := flag.NewFlagSet("server", flag.ContinueOnError)
+			registerTrustedSubnetFlag(flags)
+			require.NoError(t, flags.Parse(tc.args))
+			visited := map[string]bool{}
+			flags.Visit(func(f *flag.Flag) { visited[f.Name] = true })
+			interval := time.Second
+			applyJSONConfig(jsonconfig.Server{TrustedSubnet: tc.file}, visited, &config.Config{}, &interval)
+			configuration, err := env.ParseAs[envConfig]()
+			require.NoError(t, err)
+			configuration.applyOverrides()
+			require.Equal(t, tc.want, trustedSubnet)
+		})
+	}
+}
+
+func TestParseTrustedSubnet(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  string
+		fail  bool
+	}{
+		{value: ""},
+		{value: "192.168.1.17/24", want: "192.168.1.0/24"},
+		{value: "2001:db8::1/32", want: "2001:db8::/32"},
+		{value: "invalid", fail: true},
+		{value: "192.168.1.1", fail: true},
+		{value: "10.0.0.0/33", fail: true},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			subnet, err := parseTrustedSubnet(tc.value)
+			if tc.fail {
+				require.ErrorContains(t, err, "invalid trusted subnet")
+				return
+			}
+			require.NoError(t, err)
+			if tc.want == "" {
+				require.Nil(t, subnet)
+			} else {
+				require.Equal(t, tc.want, subnet.String())
+			}
+		})
+	}
+}
+
 func ptr[T any](v T) *T { return &v }
+
+func TestGRPCAddressConfiguration(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		file *string
+		args []string
+		env  *string
+		want string
+	}{
+		{name: "disabled by default"},
+		{name: "JSON", file: ptr("file:3200"), want: "file:3200"},
+		{name: "flag overrides JSON", file: ptr("file:3200"), args: []string{"-grpc-address", "flag:3200"}, want: "flag:3200"},
+		{name: "empty flag disables JSON", file: ptr("file:3200"), args: []string{"-grpc-address", ""}},
+		{name: "environment overrides flag", args: []string{"-grpc-address", "flag:3200"}, env: ptr("env:3200"), want: "env:3200"},
+		{name: "empty environment disables flag", args: []string{"-grpc-address", "flag:3200"}, env: ptr("")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("GRPC_ADDRESS", "")
+			require.NoError(t, os.Unsetenv("GRPC_ADDRESS"))
+			if tc.env != nil {
+				t.Setenv("GRPC_ADDRESS", *tc.env)
+			}
+			var cfg config.Config
+			flags := flag.NewFlagSet("server", flag.ContinueOnError)
+			registerGRPCFlags(flags, &cfg)
+			require.NoError(t, flags.Parse(tc.args))
+			visited := map[string]bool{}
+			flags.Visit(func(f *flag.Flag) { visited[f.Name] = true })
+			interval := time.Second
+			applyJSONConfig(jsonconfig.Server{GRPCAddress: tc.file}, visited, &cfg, &interval)
+			configuration, err := env.ParseAs[envConfig]()
+			require.NoError(t, err)
+			configuration.applyGRPCOverrides(&cfg)
+			require.Equal(t, tc.want, cfg.GRPCAddress)
+		})
+	}
+}
