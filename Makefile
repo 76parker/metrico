@@ -7,6 +7,10 @@ METRICS_SCHEMA = internal/adapters/filestorage/snapshotschema/metrics-snapshot-v
 METRICS_PACKAGE = internal/adapters/filestorage/snapshotschema
 METRICS_GEN_OUTPUT_FILE = internal/adapters/filestorage/snapshotschema/metrics-snapshot-v1.gen.go
 
+metrics_proto_codegen:
+	protoc --go_out=. --go_opt=paths=source_relative \
+		--go-grpc_out=. --go-grpc_opt=paths=source_relative internal/proto/metrics.proto
+
 test-coverage:
 	@go test -coverprofile=coverage.out ./... $(SUPRESS_OUTPUT)
 	@go tool cover -html=coverage.out $(SUPRESS_OUTPUT)

@@ -44,6 +44,7 @@ var (
 
 type envConfig struct {
 	CryptoKey       string `env:"CRYPTO_KEY"`
+	GRPCAddress     string `env:"GRPC_ADDRESS"`
 	PPROFAddress    string `env:"PPROF_ADDRESS"`
 	Addr            string `env:"ADDRESS"`
 	Key             string `env:"KEY"`
@@ -118,6 +119,7 @@ func main() {
 	registerTrustedSubnetFlag(flag.CommandLine)
 	registerAuditFlags(flag.CommandLine, &cfg.Audit)
 	registerDiagnosticsFlags(flag.CommandLine, cfg)
+	registerGRPCFlags(flag.CommandLine, cfg)
 
 	flag.Parse()
 	visited := map[string]bool{}
@@ -144,9 +146,15 @@ func main() {
 	}
 	configFromEnv.applyAuditOverrides(&cfg.Audit)
 	configFromEnv.applyDiagnosticsOverrides(cfg)
+	configFromEnv.applyGRPCOverrides(cfg)
 
 	if err := validateHostPort(hostPort); err != nil {
 		log.Fatalf("invalid server address: %v", err)
+	}
+	if cfg.GRPCAddress != "" {
+		if err := validateHostPort(cfg.GRPCAddress); err != nil {
+			log.Fatalf("invalid gRPC server address: %v", err)
+		}
 	}
 
 	cfg.HTTPConfig.Address = hostPort
@@ -186,6 +194,10 @@ func registerDiagnosticsFlags(flags *flag.FlagSet, cfg *config.Config) {
 	flags.StringVar(&cfg.PPROFAddress, "pprof-address", "", "Optional numeric loopback pprof listener address")
 }
 
+func registerGRPCFlags(flags *flag.FlagSet, cfg *config.Config) {
+	flags.StringVar(&cfg.GRPCAddress, "grpc-address", "", "Optional gRPC listener address")
+}
+
 func registerTrustedSubnetFlag(flags *flag.FlagSet) {
 	flags.StringVar(&trustedSubnet, "t", "", "Trusted subnet in CIDR notation")
 }
@@ -193,6 +205,12 @@ func registerTrustedSubnetFlag(flags *flag.FlagSet) {
 func (c *envConfig) applyDiagnosticsOverrides(cfg *config.Config) {
 	if _, hasValue := os.LookupEnv("PPROF_ADDRESS"); hasValue {
 		cfg.PPROFAddress = c.PPROFAddress
+	}
+}
+
+func (c *envConfig) applyGRPCOverrides(cfg *config.Config) {
+	if _, hasValue := os.LookupEnv("GRPC_ADDRESS"); hasValue {
+		cfg.GRPCAddress = c.GRPCAddress
 	}
 }
 
@@ -236,6 +254,9 @@ func parseTrustedSubnet(value string) (*net.IPNet, error) {
 func applyJSONConfig(c jsonconfig.Server, flags map[string]bool, cfg *config.Config, interval *time.Duration) {
 	if c.Address != nil && !flags["a"] {
 		hostPort = *c.Address
+	}
+	if c.GRPCAddress != nil && !flags["grpc-address"] {
+		cfg.GRPCAddress = *c.GRPCAddress
 	}
 	if c.Key != nil && !flags["k"] {
 		key = *c.Key

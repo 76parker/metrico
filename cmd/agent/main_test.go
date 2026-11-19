@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/76Parker/metrico/internal/agent/reporter"
 	"github.com/76Parker/metrico/internal/jsonconfig"
+	"os"
 	"testing"
 	"time"
 )
@@ -81,3 +82,43 @@ func TestJSONConfigAndOverrides(t *testing.T) {
 	}
 }
 func ptr[T any](v T) *T { return &v }
+
+func TestGRPCAddressConfiguration(t *testing.T) {
+	previous := grpcAddress
+	t.Cleanup(func() { grpcAddress = previous })
+	for _, tc := range []struct {
+		name string
+		file *string
+		flag *string
+		env  *string
+		want string
+	}{
+		{name: "disabled by default"},
+		{name: "JSON", file: ptr("file:3200"), want: "file:3200"},
+		{name: "flag overrides JSON", file: ptr("file:3200"), flag: ptr("flag:3200"), want: "flag:3200"},
+		{name: "empty flag disables JSON", file: ptr("file:3200"), flag: ptr("")},
+		{name: "environment overrides flag", flag: ptr("flag:3200"), env: ptr("env:3200"), want: "env:3200"},
+		{name: "empty environment disables flag", flag: ptr("flag:3200"), env: ptr("")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("GRPC_ADDRESS", "")
+			if err := os.Unsetenv("GRPC_ADDRESS"); err != nil {
+				t.Fatal(err)
+			}
+			grpcAddress = ""
+			flags := map[string]bool{}
+			if tc.flag != nil {
+				grpcAddress = *tc.flag
+				flags["grpc-address"] = true
+			}
+			applyJSONConfig(jsonconfig.Agent{GRPCAddress: tc.file}, flags)
+			if tc.env != nil {
+				t.Setenv("GRPC_ADDRESS", *tc.env)
+				(&envConfig{GRPCAddress: *tc.env}).redefineConfigFromEnv()
+			}
+			if grpcAddress != tc.want {
+				t.Fatalf("gRPC address = %q, want %q", grpcAddress, tc.want)
+			}
+		})
+	}
+}

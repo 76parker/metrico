@@ -26,6 +26,7 @@ func (d *Duration) UnmarshalJSON(data []byte) error {
 
 type Agent struct {
 	Address        *string   `json:"address"`
+	GRPCAddress    *string   `json:"grpc_address"`
 	ReportInterval *Duration `json:"report_interval"`
 	PollInterval   *Duration `json:"poll_interval"`
 	CryptoKey      *string   `json:"crypto_key"`
@@ -34,6 +35,7 @@ type Agent struct {
 }
 type Server struct {
 	Address           *string   `json:"address"`
+	GRPCAddress       *string   `json:"grpc_address"`
 	Restore           *bool     `json:"restore"`
 	StoreInterval     *Duration `json:"store_interval"`
 	StoreFile         *string   `json:"store_file"`

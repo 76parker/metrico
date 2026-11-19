@@ -51,6 +51,10 @@ func routeLocalIP(ctx context.Context, client *http.Client, request *http.Reques
 	if err != nil {
 		return "", err
 	}
+	return routeLocalIPToAddress(ctx, address)
+}
+
+func routeLocalIPToAddress(ctx context.Context, address string) (string, error) {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
 		return "", fmt.Errorf("parse destination %s: %w", address, err)

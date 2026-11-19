@@ -208,3 +208,40 @@ func TestParseTrustedSubnet(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+func TestGRPCAddressConfiguration(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		file *string
+		args []string
+		env  *string
+		want string
+	}{
+		{name: "disabled by default"},
+		{name: "JSON", file: ptr("file:3200"), want: "file:3200"},
+		{name: "flag overrides JSON", file: ptr("file:3200"), args: []string{"-grpc-address", "flag:3200"}, want: "flag:3200"},
+		{name: "empty flag disables JSON", file: ptr("file:3200"), args: []string{"-grpc-address", ""}},
+		{name: "environment overrides flag", args: []string{"-grpc-address", "flag:3200"}, env: ptr("env:3200"), want: "env:3200"},
+		{name: "empty environment disables flag", args: []string{"-grpc-address", "flag:3200"}, env: ptr("")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("GRPC_ADDRESS", "")
+			require.NoError(t, os.Unsetenv("GRPC_ADDRESS"))
+			if tc.env != nil {
+				t.Setenv("GRPC_ADDRESS", *tc.env)
+			}
+			var cfg config.Config
+			flags := flag.NewFlagSet("server", flag.ContinueOnError)
+			registerGRPCFlags(flags, &cfg)
+			require.NoError(t, flags.Parse(tc.args))
+			visited := map[string]bool{}
+			flags.Visit(func(f *flag.Flag) { visited[f.Name] = true })
+			interval := time.Second
+			applyJSONConfig(jsonconfig.Server{GRPCAddress: tc.file}, visited, &cfg, &interval)
+			configuration, err := env.ParseAs[envConfig]()
+			require.NoError(t, err)
+			configuration.applyGRPCOverrides(&cfg)
+			require.Equal(t, tc.want, cfg.GRPCAddress)
+		})
+	}
+}

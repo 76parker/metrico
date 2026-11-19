@@ -1,4 +1,4 @@
-// Package reporter подготавливает и отправляет пакеты метрик HTTP-серверу.
+// Package reporter подготавливает и отправляет пакеты метрик по HTTP или gRPC.
 package reporter
 
 import (
@@ -18,6 +18,7 @@ import (
 
 	"github.com/76Parker/metrico/internal/cryptomsg"
 	"github.com/76Parker/metrico/internal/domain/metrics"
+	metricspb "github.com/76Parker/metrico/internal/proto"
 	"github.com/76Parker/metrico/internal/signature"
 	goccyjson "github.com/goccy/go-json"
 )
@@ -39,7 +40,7 @@ type systemMetricProvider interface {
 	Metrics() []metrics.Metrics
 }
 
-// MetricReporter периодически отправляет runtime- и системные метрики пакетами по HTTP.
+// MetricReporter периодически отправляет runtime- и системные метрики пакетами.
 type MetricReporter struct {
 	client          *http.Client
 	cryptoKey       *rsa.PublicKey
@@ -51,6 +52,9 @@ type MetricReporter struct {
 	rateLimit       int
 	shutdownTimeout time.Duration
 	resolveLocalIP  localIPResolver
+	grpcClient      metricspb.MetricsClient
+	grpcAddress     string
+	resolveGRPCIP   func(context.Context, string) (string, error)
 }
 
 const defaultShutdownTimeout = 5 * time.Second
@@ -68,6 +72,14 @@ type Option func(*MetricReporter)
 func WithHTTPClient(client *http.Client) Option {
 	return func(reporter *MetricReporter) {
 		reporter.client = client
+	}
+}
+
+// WithGRPCClient selects gRPC instead of HTTP for sending metric batches.
+func WithGRPCClient(client metricspb.MetricsClient, address string) Option {
+	return func(reporter *MetricReporter) {
+		reporter.grpcClient = client
+		reporter.grpcAddress = address
 	}
 }
 
@@ -111,8 +123,8 @@ func WithSystemMetricProvider(provider systemMetricProvider) Option {
 }
 
 // NewMetricReporter разбирает адрес сервера и применяет опции отправки.
-// При ошибке разбора URL возвращает nil. Для Run задайте HTTP-клиент, источник
-// runtime-метрик и положительный интервал соответствующими опциями.
+// При ошибке разбора URL возвращает nil. Для Run задайте HTTP- или gRPC-клиент,
+// источник runtime-метрик и положительный интервал соответствующими опциями.
 func NewMetricReporter(
 	serverAddr string,
 	options ...Option,
@@ -126,6 +138,7 @@ func NewMetricReporter(
 		rateLimit:       1,
 		shutdownTimeout: defaultShutdownTimeout,
 		resolveLocalIP:  routeLocalIP,
+		resolveGRPCIP:   routeLocalIPToAddress,
 	}
 	for _, option := range options {
 		option(reporter)
@@ -283,6 +296,9 @@ func (r *MetricReporter) sendBatch(metricsBatch []metrics.Metrics) error {
 }
 
 func (r *MetricReporter) sendBatchContext(ctx context.Context, metricsBatch []metrics.Metrics) error {
+	if r.grpcClient != nil {
+		return r.sendGRPCBatch(ctx, metricsBatch)
+	}
 	body, err := goccyjson.Marshal(metricsBatch)
 	if err != nil {
 		return fmt.Errorf("marshal metric batch: %w", err)

@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -18,7 +19,10 @@ import (
 	"github.com/76Parker/metrico/internal/agent/reporter"
 	"github.com/76Parker/metrico/internal/cryptomsg"
 	"github.com/76Parker/metrico/internal/jsonconfig"
+	metricspb "github.com/76Parker/metrico/internal/proto"
 	"github.com/caarlos0/env/v11"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 const (
@@ -33,12 +37,14 @@ var (
 	reportInterval time.Duration
 	rateLimit      int
 	addr           string
+	grpcAddress    string
 	key            string
 	cryptoKeyPath  string
 )
 
 type envConfig struct {
 	CryptoKey      string `env:"CRYPTO_KEY"`
+	GRPCAddress    string `env:"GRPC_ADDRESS"`
 	ServerAddress  string `env:"ADDRESS"`
 	Key            string `env:"KEY"`
 	PollInterval   int    `env:"POLL_INTERVAL"`
@@ -49,6 +55,9 @@ type envConfig struct {
 func (e *envConfig) redefineConfigFromEnv() {
 	if _, ok := os.LookupEnv("ADDRESS"); ok {
 		addr = e.ServerAddress
+	}
+	if _, ok := os.LookupEnv("GRPC_ADDRESS"); ok {
+		grpcAddress = e.GRPCAddress
 	}
 	if _, ok := os.LookupEnv("CRYPTO_KEY"); ok {
 		cryptoKeyPath = e.CryptoKey
@@ -86,6 +95,7 @@ func main() {
 	var configPath string
 	jsonconfig.RegisterPath(flag.CommandLine, &configPath)
 	flag.StringVar(&addr, "a", defaultAddr, "Listener address")
+	flag.StringVar(&grpcAddress, "grpc-address", "", "Optional gRPC server address")
 	flag.StringVar(&key, "k", "", "Hash key")
 	flag.StringVar(&cryptoKeyPath, "crypto-key", "", "RSA public key file")
 	flag.IntVar(&pollSeconds, "p", int(defaultPollInterval/time.Second), "Poll interval for metric provider in seconds")
@@ -141,8 +151,7 @@ func main() {
 	}
 	runtimeProvider := provider.NewMetricProviderWithContext(ctx, pollInterval)
 	systemProvider := provider.NewSystemMetricProviderWithContext(ctx, pollInterval)
-	reporter := reporter.NewMetricReporter(
-		addr,
+	reporterOptions := []reporter.Option{
 		reporter.WithHTTPClient(httpClient),
 		reporter.WithMetricProvider(runtimeProvider),
 		reporter.WithReportInterval(reportInterval),
@@ -150,7 +159,23 @@ func main() {
 		reporter.WithCryptoKey(publicKey),
 		reporter.WithRateLimit(rateLimit),
 		reporter.WithSystemMetricProvider(systemProvider),
-	)
+	}
+	if grpcAddress != "" {
+		host, port, err := net.SplitHostPort(grpcAddress)
+		if err != nil || host == "" || port == "" {
+			log.Fatal("invalid gRPC server address: expected host:port")
+		}
+		conn, err := grpc.NewClient(grpcAddress,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithDisableRetry(),
+		)
+		if err != nil {
+			log.Fatalf("create gRPC client: %v", err)
+		}
+		defer conn.Close()
+		reporterOptions = append(reporterOptions, reporter.WithGRPCClient(metricspb.NewMetricsClient(conn), grpcAddress))
+	}
+	reporter := reporter.NewMetricReporter(addr, reporterOptions...)
 	if err := reporterError(reporter.Run(ctx)); err != nil {
 		log.Fatal(err)
 	}
@@ -174,6 +199,9 @@ func applyEnvOverrides() (envConfig, error) {
 func applyJSONConfig(c jsonconfig.Agent, flags map[string]bool) {
 	if c.Address != nil && !flags["a"] {
 		addr = *c.Address
+	}
+	if c.GRPCAddress != nil && !flags["grpc-address"] {
+		grpcAddress = *c.GRPCAddress
 	}
 	if c.Key != nil && !flags["k"] {
 		key = *c.Key
